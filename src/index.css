@@ -1,0 +1,128 @@
+@import "tailwindcss";
+
+:root {
+  --color-primary: #1D4ED8;
+  --color-secondary: #2563EB;
+  --color-bg: #F8FAFC;
+  --color-surface: #FFFFFF;
+  --color-text: #0F172A;
+  --color-text-muted: #64748B;
+  --color-button: #1D4ED8;
+  --color-button-hover: #1E40AF;
+  --color-header: #0F172A;
+  --color-border: #E2E8F0;
+  --color-success: #10B981;
+  --color-warning: #F59E0B;
+  --color-error: #EF4444;
+  --app-font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --app-radius: 12px;
+  --app-scale: 1;
+}
+
+@layer base {
+  body {
+    font-family: var(--app-font-family);
+    background-color: var(--color-bg);
+    color: var(--color-text);
+  }
+  
+  h1, h2, h3, .font-display {
+    font-family: var(--app-font-family);
+  }
+}
+
+/* Customization Design Variables Utility Classes */
+.bg-theme-main { background-color: var(--color-bg) !important; }
+.bg-theme-surface { background-color: var(--color-surface) !important; }
+.text-theme-main { color: var(--color-text) !important; }
+.text-theme-muted { color: var(--color-text-muted) !important; }
+.text-theme-header { color: var(--color-header) !important; }
+.border-theme { border-color: var(--color-border) !important; }
+.btn-theme-primary {
+  background-color: var(--color-button) !important;
+  color: #ffffff !important;
+}
+.btn-theme-primary:hover {
+  background-color: var(--color-button-hover) !important;
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 25px rgba(59, 130, 246, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 60px rgba(59, 130, 246, 0.85);
+  }
+}
+
+@keyframes pulseGlowCaja {
+  0%, 100% {
+    box-shadow: 0 0 25px rgba(6, 182, 212, 0.45), 0 0 50px rgba(59, 130, 246, 0.35);
+    border-color: rgba(34, 211, 238, 0.9);
+  }
+  50% {
+    box-shadow: 0 0 60px rgba(6, 182, 212, 0.9), 0 0 100px rgba(59, 130, 246, 0.7);
+    border-color: rgba(165, 243, 252, 1);
+  }
+}
+
+@keyframes pulseGlowTriada {
+  0%, 100% {
+    box-shadow: 0 0 25px rgba(147, 51, 234, 0.45), 0 0 50px rgba(99, 102, 241, 0.35);
+    border-color: rgba(192, 132, 252, 0.9);
+  }
+  50% {
+    box-shadow: 0 0 60px rgba(147, 51, 234, 0.9), 0 0 100px rgba(99, 102, 241, 0.7);
+    border-color: rgba(240, 171, 252, 1);
+  }
+}
+
+.pulse-glow {
+  animation: pulseGlow 1.8s infinite ease-in-out;
+}
+
+.pulse-glow-caja {
+  animation: pulseGlowCaja 1.4s infinite ease-in-out;
+}
+
+.pulse-glow-triada {
+  animation: pulseGlowTriada 1.4s infinite ease-in-out;
+}
+
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  
+  body * {
+    visibility: hidden;
+  }
+
+  #ticket-imprimible, #ticket-imprimible * {
+    visibility: visible !important;
+  }
+
+  #ticket-imprimible {
+    position: absolute !important;
+    left: 50% !important;
+    top: 20px !important;
+    transform: translateX(-50%) !important;
+    width: 320px !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    padding: 24px !important;
+    background: #ffffff !important;
+    color: #111827 !important;
+    box-shadow: none !important;
+    border: 2px dashed #9ca3af !important;
+    border-radius: 12px !important;
+  }
+
+  .no-print {
+    display: none !important;
+    visibility: hidden !important;
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Sistema de Gestión de Turnos en Tiempo Real",
+  "description": "Sistema completo de gestión y asignación automática de turnos para atención al público con actualización en tiempo real, pantalla de cajas y monitor público.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
