@@ -7,21 +7,30 @@ import { dispatcher } from './server/dispatcher.js';
 import { wsManager } from './server/websocket.js';
 import { EventoRealtime } from './src/types.js';
 
+export const app = express();
+const PORT = Number(process.env.PORT) || 3000;
+const server = http.createServer(app);
+
+app.use(express.json({ limit: '10mb' }));
+
+// Inicializar servidor de WebSockets en el mismo puerto HTTP
+wsManager.init(server);
+
 async function startServer() {
-  const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
-  const server = http.createServer(app);
-
-  app.use(express.json({ limit: '10mb' }));
-
-  // Inicializar servidor de WebSockets en el mismo puerto HTTP
-  wsManager.init(server);
+  // Sincronizar con Supabase si está disponible antes de procesar solicitudes
+  await db.initSupabase();
 
   // --- RUTAS DE API ---
 
   // 1. Healthcheck
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', serverTime: new Date().toISOString() });
+  });
+
+  // Diagnóstico seguro de conexión a Supabase
+  app.get('/api/diagnostico-supabase', async (req, res) => {
+    const diag = await db.diagnosticarSupabase();
+    res.json(diag);
   });
 
   // 1.5. Configuración Visual e Identidad Institucional
@@ -341,6 +350,14 @@ async function startServer() {
   app.get('/api/cajas/:id/historial-hoy', (req, res) => {
     const cajaId = Number(req.params.id);
     const tickets = db.getHistorialCajaHoy(cajaId);
+    res.json({ tickets });
+  });
+
+  // Historial descargable por rangos (diario, semanal, mensual, anual)
+  app.get('/api/cajas/:id/historial', (req, res) => {
+    const cajaId = Number(req.params.id);
+    const rango = (req.query.rango as 'diario' | 'semanal' | 'mensual' | 'anual') || 'diario';
+    const tickets = db.getHistorialCajaRange(cajaId, rango);
     res.json({ tickets });
   });
 
@@ -967,12 +984,16 @@ async function startServer() {
     });
   }
 
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`[SERVER] Servidor ejecutándose en http://0.0.0.0:${PORT}`);
-  });
+  if (!process.env.VERCEL) {
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`[SERVER] Servidor ejecutándose en http://0.0.0.0:${PORT}`);
+    });
+  }
 }
 
 startServer().catch((err) => {
   console.error('[SERVER ERROR] Error fatal iniciando servidor:', err);
-  process.exit(1);
+  if (!process.env.VERCEL) {
+    process.exit(1);
+  }
 });

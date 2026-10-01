@@ -76,6 +76,7 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [mostrarCambioModulo, setMostrarCambioModulo] = useState(false);
   const [tabActiva, setTabActiva] = useState<'ATENCION' | 'COLA' | 'HISTORIAL'>('ATENCION');
+  const [rangoSeleccionado, setRangoSeleccionado] = useState<'diario' | 'semanal' | 'mensual' | 'anual'>('diario');
   const [historialTickets, setHistorialTickets] = useState<Ticket[]>([]);
   const [loadingHistorial, setLoadingHistorial] = useState(false);
   const [cronometroSegundos, setCronometroSegundos] = useState(0);
@@ -143,11 +144,11 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
   }, [ticketActual?.estado, ticketActual?.fechaInicio]);
 
   // Cargar historial
-  const cargarHistorial = async () => {
+  const cargarHistorial = async (rango = rangoSeleccionado) => {
     if (!moduloActual) return;
     setLoadingHistorial(true);
     try {
-      const res = await fetch(`/api/cajas/${moduloActual.id}/historial-hoy`);
+      const res = await fetch(`/api/cajas/${moduloActual.id}/historial?rango=${rango}`);
       if (res.ok) {
         const data = await res.json();
         setHistorialTickets(data.tickets || []);
@@ -161,9 +162,9 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
 
   useEffect(() => {
     if (tabActiva === 'HISTORIAL') {
-      cargarHistorial();
+      cargarHistorial(rangoSeleccionado);
     }
-  }, [tabActiva, moduloActual?.id]);
+  }, [tabActiva, moduloActual?.id, rangoSeleccionado]);
 
   const formatearTiempo = (segundos: number) => {
     const min = Math.floor(segundos / 60);
@@ -263,7 +264,8 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
       caja: moduloActual,
       usuario: sessionUsuario,
       tickets: historialTickets,
-      tipoEstacion: 'TRIADA'
+      tipoEstacion: 'TRIADA',
+      rango: rangoSeleccionado
     });
   };
 
@@ -1103,15 +1105,33 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
       {/* VISTA 3: HISTORIAL DE TICKETS ATENDIDOS HOY EN ESTA TRIADA */}
       {tabActiva === 'HISTORIAL' && (
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800 mb-4">
             <div>
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 <FileText className="w-5 h-5 text-indigo-400" />
-                <span>Historial de Atenciones en Triada {moduloActual.numero}</span>
+                <span>Historial de Atenciones en Triada {moduloActual.numero} ({rangoSeleccionado === 'diario' ? 'Hoy' : rangoSeleccionado === 'semanal' ? 'Últimos 7 días' : rangoSeleccionado === 'mensual' ? 'Últimos 30 días' : 'Último año'})</span>
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Total de trámites y fotografías procesadas en este módulo durante la jornada de hoy.
+                Total de trámites y fotografías procesadas en este módulo durante el período seleccionado.
               </p>
+
+              {/* Selector de rango de tiempo para el reporte */}
+              <div className="flex items-center gap-1.5 p-1 bg-slate-950/80 border border-slate-800 rounded-xl mt-3 flex-wrap max-w-max">
+                {(['diario', 'semanal', 'mensual', 'anual'] as const).map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setRangoSeleccionado(r)}
+                    className={`px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold uppercase transition-all cursor-pointer ${
+                      rangoSeleccionado === r
+                        ? 'bg-indigo-600 text-white shadow'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
+                    }`}
+                  >
+                    {r === 'diario' ? 'Diario' : r === 'semanal' ? 'Semanal' : r === 'mensual' ? 'Mensual' : 'Anual'}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">

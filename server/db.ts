@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { createClient } from '@supabase/supabase-js';
 import { 
   Usuario, 
   Caja, 
@@ -10,6 +11,19 @@ import {
   EstadoGlobalSnapshot,
   ConfiguracionVisual
 } from '../src/types.js';
+
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+
+let supabase: any = null;
+if (supabaseUrl && supabaseKey) {
+  try {
+    supabase = createClient(supabaseUrl, supabaseKey);
+    console.log('[SUPABASE] Cliente inicializado correctamente para: ' + supabaseUrl);
+  } catch (err) {
+    console.error('[SUPABASE] Error inicializando cliente de Supabase:', err);
+  }
+}
 
 export const DEFAULT_CONFIGURACION_VISUAL: ConfiguracionVisual = {
   nombreSistema: 'Sistema de Gestión de Turnos',
@@ -249,6 +263,107 @@ class Database {
     this.data = this.load();
   }
 
+  private mapToSupabase(table: string, record: any): any {
+    const res: any = {};
+    for (const k of Object.keys(record)) {
+      const snake = k.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+      res[snake] = record[k];
+    }
+    // Overrides específicos si aplican
+    if (table === 'usuarios') {
+      // Evitar guardar socketId o estados volátiles si existieran
+    }
+    return res;
+  }
+
+  private mapFromSupabase(table: string, record: any): any {
+    const res: any = {};
+    for (const k of Object.keys(record)) {
+      const camel = k.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+      res[camel] = record[k];
+    }
+    return res;
+  }
+
+  public async syncToSupabase(table: string, record: any) {
+    if (!supabase) return;
+    try {
+      const mapped = this.mapToSupabase(table, record);
+      const { error } = await supabase.from(table).upsert(mapped);
+      if (error) {
+        console.warn(`[SUPABASE] Advertencia upsert en ${table}:`, error.message);
+      }
+    } catch (err: any) {
+      console.error(`[SUPABASE] Error de conexión al guardar en ${table}:`, err.message || err);
+    }
+  }
+
+  public async deleteFromSupabase(table: string, id: any) {
+    if (!supabase) return;
+    try {
+      const { error } = await supabase.from(table).delete().eq('id', id);
+      if (error) {
+        console.warn(`[SUPABASE] Advertencia delete en ${table}:`, error.message);
+      }
+    } catch (err: any) {
+      console.error(`[SUPABASE] Error de conexión al eliminar en ${table}:`, err.message || err);
+    }
+  }
+
+  public async initSupabase() {
+    if (!supabase) {
+      console.log('[SUPABASE] No se detectaron credenciales de Supabase en variables de entorno. Usando base de datos JSON local.');
+      return;
+    }
+    try {
+      console.log('[SUPABASE] Sincronizando datos desde la base de datos de Supabase...');
+      
+      // 1. Cargar Usuarios
+      const { data: dbUsuarios, error: errU } = await supabase.from('usuarios').select('*');
+      if (errU) throw errU;
+      if (dbUsuarios && dbUsuarios.length > 0) {
+        this.data.usuarios = dbUsuarios.map((u: any) => this.mapFromSupabase('usuarios', u));
+      }
+
+      // 2. Cargar Cajas
+      const { data: dbCajas, error: errC } = await supabase.from('cajas').select('*');
+      if (errC) throw errC;
+      if (dbCajas && dbCajas.length > 0) {
+        this.data.cajas = dbCajas.map((c: any) => this.mapFromSupabase('cajas', c));
+      }
+
+      // 3. Cargar Tickets
+      const { data: dbTickets, error: errT } = await supabase.from('tickets').select('*');
+      if (errT) throw errT;
+      if (dbTickets && dbTickets.length > 0) {
+        this.data.tickets = dbTickets.map((t: any) => this.mapFromSupabase('tickets', t));
+      }
+
+      // 4. Cargar Tracking (Eventos)
+      const { data: dbTracking, error: errTr } = await supabase.from('tracking_tickets').select('*').order('timestamp', { ascending: false }).limit(500);
+      if (!errTr && dbTracking && dbTracking.length > 0) {
+        this.data.eventos = dbTracking.map((e: any) => {
+          return {
+            type: e.tipo_evento,
+            timestamp: e.timestamp,
+            sedeId: e.sede_id,
+            codigo: e.codigo,
+            caja: e.caja,
+            cajaId: e.caja_id,
+            funcionario: e.funcionario,
+            ciudadano: e.ciudadano,
+            payload: e.payload || {}
+          };
+        });
+      }
+
+      console.log('[SUPABASE] Sincronización inicial con Supabase exitosa.');
+    } catch (err: any) {
+      console.error('[SUPABASE] Error en sincronización con Supabase (¿ejecutaste el script SQL de creación de tablas?):', err.message || err);
+      console.log('[SUPABASE] Continuando con datos locales JSON de respaldo.');
+    }
+  }
+
   private load(): DatabaseSchema {
     try {
       if (!fs.existsSync(DATA_DIR)) {
@@ -410,6 +525,7 @@ class Database {
     };
     this.data.usuarios.push(nuevo);
     this.scheduleSave();
+    this.syncToSupabase('usuarios', nuevo);
     return nuevo;
   }
 
@@ -418,6 +534,7 @@ class Database {
     if (!user) return null;
     Object.assign(user, patch);
     this.scheduleSave();
+    this.syncToSupabase('usuarios', user);
     return user;
   }
 
@@ -426,6 +543,7 @@ class Database {
     if (idx === -1) return false;
     this.data.usuarios.splice(idx, 1);
     this.scheduleSave();
+    this.deleteFromSupabase('usuarios', id);
     return true;
   }
 
@@ -438,6 +556,54 @@ class Database {
       const fFin = t.fechaFinalizacion ? t.fechaFinalizacion.split('T')[0] : '';
       const fLlamado = t.fechaLlamado ? t.fechaLlamado.split('T')[0] : '';
       return fCreacion === hoyStr || fFin === hoyStr || fLlamado === hoyStr;
+    });
+
+    return tickets.map(t => {
+      let duracionSegundos = 0;
+      if (t.fechaInicio && t.fechaFinalizacion) {
+        duracionSegundos = Math.max(0, Math.floor((new Date(t.fechaFinalizacion).getTime() - new Date(t.fechaInicio).getTime()) / 1000));
+      }
+      let esperaSegundos = 0;
+      if (t.fechaCreacion && t.fechaLlamado) {
+        esperaSegundos = Math.max(0, Math.floor((new Date(t.fechaLlamado).getTime() - new Date(t.fechaCreacion).getTime()) / 1000));
+      }
+
+      return {
+        ...t,
+        duracionSegundos,
+        esperaSegundos,
+        duracionFormato: `${Math.floor(duracionSegundos / 60)}m ${duracionSegundos % 60}s`,
+        esperaFormato: `${Math.floor(esperaSegundos / 60)}m ${esperaSegundos % 60}s`
+      };
+    }).sort((a, b) => {
+      const timeA = a.fechaFinalizacion || a.fechaLlamado || a.fechaCreacion;
+      const timeB = b.fechaFinalizacion || b.fechaLlamado || b.fechaCreacion;
+      return new Date(timeB).getTime() - new Date(timeA).getTime();
+    });
+  }
+
+  // --- Historial de Caja por Rangos de Tiempo (Diario, Semanal, Mensual, Anual) ---
+  public getHistorialCajaRange(cajaId: number, rango: 'diario' | 'semanal' | 'mensual' | 'anual') {
+    const now = new Date();
+    let limitDate = new Date();
+
+    if (rango === 'diario') {
+      limitDate.setHours(0, 0, 0, 0);
+    } else if (rango === 'semanal') {
+      limitDate.setDate(now.getDate() - 7);
+      limitDate.setHours(0, 0, 0, 0);
+    } else if (rango === 'mensual') {
+      limitDate.setDate(now.getDate() - 30);
+      limitDate.setHours(0, 0, 0, 0);
+    } else if (rango === 'anual') {
+      limitDate.setDate(now.getDate() - 365);
+      limitDate.setHours(0, 0, 0, 0);
+    }
+
+    const tickets = this.data.tickets.filter(t => {
+      if (t.cajaId !== cajaId) return false;
+      const tDate = new Date(t.fechaFinalizacion || t.fechaLlamado || t.fechaCreacion);
+      return tDate >= limitDate;
     });
 
     return tickets.map(t => {
@@ -481,6 +647,7 @@ class Database {
     if (!caja) return null;
     Object.assign(caja, patch, { ultimaActividad: new Date().toISOString() });
     this.scheduleSave();
+    this.syncToSupabase('cajas', caja);
     return caja;
   }
 
@@ -492,6 +659,7 @@ class Database {
       caja.estado = 'INACTIVA';
     }
     this.scheduleSave();
+    this.syncToSupabase('cajas', caja);
     return caja;
   }
 
@@ -560,6 +728,7 @@ class Database {
 
     this.data.tickets.push(nuevo);
     this.scheduleSave();
+    this.syncToSupabase('tickets', nuevo);
     return nuevo;
   }
 
@@ -568,6 +737,7 @@ class Database {
     if (!ticket) return null;
     Object.assign(ticket, patch);
     this.scheduleSave();
+    this.syncToSupabase('tickets', ticket);
     return ticket;
   }
 
@@ -589,6 +759,20 @@ class Database {
       this.data.eventos.length = 500;
     }
     this.scheduleSave();
+    
+    this.syncToSupabase('tracking_tickets', {
+      ticketId: evento.payload?.id || evento.codigo || '',
+      tipoEvento: evento.type,
+      numero: evento.payload?.numero?.toString() || '',
+      codigo: evento.codigo || '',
+      caja: evento.caja,
+      cajaId: evento.cajaId,
+      funcionario: evento.funcionario || '',
+      ciudadano: evento.ciudadano || '',
+      sedeId: evento.sedeId || 'ancon',
+      payload: evento.payload || {},
+      timestamp: evento.timestamp || new Date().toISOString()
+    });
   }
 
   public getEventos(limit = 100): EventoRealtime[] {
@@ -724,6 +908,42 @@ class Database {
     this.data.configuracionVisual = { ...DEFAULT_CONFIGURACION_VISUAL };
     this.scheduleSave();
     return { ...this.data.configuracionVisual };
+  }
+
+  public async diagnosticarSupabase() {
+    const urlConfigured = !!supabaseUrl;
+    const keyConfigured = !!supabaseKey;
+    let databaseConnection = false;
+    let regionalesQuery = false;
+    let regionalesCount = 0;
+    let errorMsg = null;
+
+    if (supabase) {
+      try {
+        const { data, error, count } = await supabase
+          .from('regionales')
+          .select('*', { count: 'exact' });
+        
+        if (error) {
+          errorMsg = error.message;
+        } else {
+          databaseConnection = true;
+          regionalesQuery = true;
+          regionalesCount = count !== null && count !== undefined ? count : (data ? data.length : 0);
+        }
+      } catch (err: any) {
+        errorMsg = err.message || err;
+      }
+    }
+
+    return {
+      supabase_url_configured: urlConfigured,
+      supabase_key_configured: keyConfigured,
+      database_connection: databaseConnection,
+      regionales_query: regionalesQuery,
+      regionales_count: regionalesCount,
+      ...(errorMsg ? { error_details: errorMsg } : {})
+    };
   }
 }
 

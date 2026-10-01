@@ -7,13 +7,15 @@ export interface HistorialPdfParams {
   usuario: Usuario | null;
   tickets: any[];
   tipoEstacion?: 'CAJA' | 'TRIADA';
+  rango?: 'diario' | 'semanal' | 'mensual' | 'anual';
 }
 
 export function generarPdfHistorial({
   caja,
   usuario,
   tickets,
-  tipoEstacion = 'CAJA'
+  tipoEstacion = 'CAJA',
+  rango = 'diario'
 }: HistorialPdfParams): void {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -28,6 +30,8 @@ export function generarPdfHistorial({
     day: 'numeric'
   });
   const horaEmision = new Date().toLocaleTimeString('es-ES');
+
+  const tituloRango = rango === 'diario' ? 'Diario (Hoy)' : rango === 'semanal' ? 'Semanal (Últimos 7 días)' : rango === 'mensual' ? 'Mensual (Últimos 30 días)' : 'Anual (Último año)';
 
   const finalizados = tickets.filter(t => t.estado === 'FINALIZADO');
   const noPresentados = tickets.filter(t => t.estado === 'NO_PRESENTO');
@@ -58,7 +62,7 @@ export function generarPdfHistorial({
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.text('REPORTE OFICIAL DE TICKETS ATENDIDOS • JORNADA LABORAL', 14, 18);
+  doc.text(`REPORTE OFICIAL DE TICKETS ATENDIDOS • PERÍODO: ${tituloRango.toUpperCase()}`, 14, 18);
 
   // 2. Título del Reporte y Datos de la Cajera / Estación
   doc.setTextColor(30, 41, 59); // Slate 800
@@ -76,13 +80,13 @@ export function generarPdfHistorial({
   doc.setTextColor(71, 85, 105); // Slate 600
   doc.text('Cajera / Funcionario:', 18, 45);
   doc.text('Estación / Módulo:', 18, 52);
-  doc.text('Fecha de la Jornada:', 18, 59);
+  doc.text('Período Reportado:', 18, 59);
 
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(15, 23, 42); // Slate 900
   doc.text(`${nombreFuncionario} (${usuario?.usuario || usuario?.email || 'cajera'})`, 60, 45);
   doc.text(`${nombreEstacion} - ${caja.nombre || 'Atención al Ciudadano'}`, 60, 52);
-  doc.text(`${fechaHoy.charAt(0).toUpperCase() + fechaHoy.slice(1)} • ${horaEmision}`, 60, 59);
+  doc.text(`${tituloRango} (Corte: ${fechaHoy} ${horaEmision})`, 60, 59);
 
   // 3. Tarjetas Resumen de Métricas (KPIs)
   const cardY = 68;

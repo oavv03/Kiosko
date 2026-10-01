@@ -54,6 +54,7 @@ export const CajaView: React.FC<CajaViewProps> = ({
   const [cronometroSegundos, setCronometroSegundos] = useState(0);
   const [modoLlamado, setModoLlamado] = useState<'VOZ' | 'PITIDO'>('VOZ');
   const [tabActiva, setTabActiva] = useState<'ATENCION' | 'HISTORIAL'>('ATENCION');
+  const [rangoSeleccionado, setRangoSeleccionado] = useState<'diario' | 'semanal' | 'mensual' | 'anual'>('diario');
 
   const cajasRegulares = cajas.filter(c => c.tipo !== 'TRIADA');
   const modulosTriada = cajas.filter(c => c.tipo === 'TRIADA');
@@ -119,11 +120,11 @@ export const CajaView: React.FC<CajaViewProps> = ({
     setLoginError(null);
   }, [cajaId]);
 
-  // Cargar historial del día
-  const cargarHistorial = async () => {
+  // Cargar historial del día o rango
+  const cargarHistorial = async (rango = rangoSeleccionado) => {
     setLoadingHistorial(true);
     try {
-      const res = await fetch(`/api/cajas/${cajaId}/historial-hoy`);
+      const res = await fetch(`/api/cajas/${cajaId}/historial?rango=${rango}`);
       if (res.ok) {
         const data = await res.json();
         setHistorialTickets(data.tickets || []);
@@ -137,9 +138,9 @@ export const CajaView: React.FC<CajaViewProps> = ({
 
   useEffect(() => {
     if (tabActiva === 'HISTORIAL') {
-      cargarHistorial();
+      cargarHistorial(rangoSeleccionado);
     }
-  }, [tabActiva, cajaId]);
+  }, [tabActiva, cajaId, rangoSeleccionado]);
 
   // Buscar el ticket que tiene esta caja (desde la lista de tickets o desde la caja)
   const ticketActual = ticketsActivos.find(t => t.cajaId === cajaId && (t.estado === 'ASIGNADO' || t.estado === 'LLAMANDO' || t.estado === 'EN_ATENCION')) 
@@ -284,7 +285,8 @@ export const CajaView: React.FC<CajaViewProps> = ({
       caja,
       usuario: sessionUsuario,
       tickets: historialTickets,
-      tipoEstacion: 'CAJA'
+      tipoEstacion: 'CAJA',
+      rango: rangoSeleccionado
     });
   };
 
@@ -1176,7 +1178,9 @@ export const CajaView: React.FC<CajaViewProps> = ({
           {/* Métricas del día de la caja */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow">
-              <span className="text-[11px] uppercase tracking-wider font-bold text-slate-400 block">Total Atendidos Hoy</span>
+              <span className="text-[11px] uppercase tracking-wider font-bold text-slate-400 block">
+                {rangoSeleccionado === 'diario' ? 'Total Atendidos Hoy' : rangoSeleccionado === 'semanal' ? 'Atendidos Semanal' : rangoSeleccionado === 'mensual' ? 'Atendidos Mensual' : 'Atendidos Anual'}
+              </span>
               <div className="text-2xl sm:text-3xl font-black text-white mt-1 font-display">{totalAtendidos}</div>
             </div>
 
@@ -1204,16 +1208,34 @@ export const CajaView: React.FC<CajaViewProps> = ({
               <div>
                 <h3 className="text-lg font-bold text-white flex items-center gap-2">
                   <FileSpreadsheet className="w-5 h-5 text-emerald-400" />
-                  Registro de Tickets Atendidos Hoy
+                  Registro de Tickets Atendidos ({rangoSeleccionado === 'diario' ? 'Hoy' : rangoSeleccionado === 'semanal' ? 'Últimos 7 días' : rangoSeleccionado === 'mensual' ? 'Últimos 30 días' : 'Último año'})
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Reporte oficial de turnos despachados en {caja.nombre} durante la jornada de hoy.
+                  Reporte oficial de turnos despachados en {caja.nombre} durante el período seleccionado.
                 </p>
+
+                {/* Selector de rango de tiempo para el reporte */}
+                <div className="flex items-center gap-1.5 p-1 bg-slate-950/80 border border-slate-800 rounded-xl mt-3 flex-wrap max-w-max">
+                  {(['diario', 'semanal', 'mensual', 'anual'] as const).map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setRangoSeleccionado(r)}
+                      className={`px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold uppercase transition-all cursor-pointer ${
+                        rangoSeleccionado === r
+                          ? 'bg-blue-600 text-white shadow'
+                          : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
+                      }`}
+                    >
+                      {r === 'diario' ? 'Diario' : r === 'semanal' ? 'Semanal' : r === 'mensual' ? 'Mensual' : 'Anual'}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
                 <button
-                  onClick={cargarHistorial}
+                  onClick={() => cargarHistorial()}
                   disabled={loadingHistorial}
                   title="Refrescar datos del historial"
                   className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"

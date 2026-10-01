@@ -39,9 +39,103 @@ class WebSocketClient {
     return this.status;
   }
 
+  private pollingIntervalId: any = null;
+  private lastPayloadString = '';
+  private lastCalledTicketId = '';
+  private lastCalledCounter = 0;
+
   private setStatus(newStatus: 'CONNECTED' | 'CONNECTING' | 'DISCONNECTED') {
     this.status = newStatus;
     this.statusListeners.forEach(cb => cb(newStatus));
+    if (newStatus === 'CONNECTED') {
+      this.stopPollingFallback();
+    } else {
+      this.startPollingFallback();
+    }
+  }
+
+  private startPollingFallback() {
+    if (this.pollingIntervalId) return;
+    console.log('[WS CLIENT] WebSocket desconectado. Activando sondeo (polling) de respaldo para Vercel...');
+    this.pollingIntervalId = setInterval(async () => {
+      if (this.status === 'CONNECTED') {
+        this.stopPollingFallback();
+        return;
+      }
+      try {
+        const sedeId = this.currentRegistration?.sedeId || 'ancon';
+        const response = await fetch(`/api/estado?sedeId=${sedeId}`);
+        if (!response.ok) return;
+        const snapshot = await response.json();
+        
+        const payloadString = JSON.stringify(snapshot);
+        if (payloadString === this.lastPayloadString) {
+          return;
+        }
+        this.lastPayloadString = payloadString;
+
+        // Construir y disparar el evento de estado del sistema
+        const simulatedEvent = {
+          type: 'ESTADO_SISTEMA' as const,
+          timestamp: new Date().toISOString(),
+          sedeId,
+          payload: snapshot
+        };
+
+        // Si hay algún ticket llamando, detectarlo para disparar audio
+        const ticketsLlamando = snapshot.ticketsActivos?.filter((t: any) => t.estado === 'LLAMANDO') || [];
+        if (ticketsLlamando.length > 0) {
+          const mainTicket = ticketsLlamando[0];
+          const triggerAudio = mainTicket.id !== this.lastCalledTicketId || mainTicket.llamadosContador !== this.lastCalledCounter;
+          
+          if (triggerAudio) {
+            this.lastCalledTicketId = mainTicket.id;
+            this.lastCalledCounter = mainTicket.llamadosContador || 0;
+
+            const simulatedCallEvent = {
+              type: 'TICKET_LLAMADO' as const,
+              codigo: mainTicket.codigo,
+              caja: mainTicket.cajaNumero,
+              cajaId: mainTicket.cajaId,
+              destinoTipo: mainTicket.etapa === 'TRIADA' ? 'TRIADA' as const : 'CAJA' as const,
+              ciudadano: [mainTicket.ciudadanoNombre, mainTicket.ciudadanoApellido].filter(Boolean).join(' '),
+              payload: {
+                modoLlamado: mainTicket.modoLlamado || 'VOZ',
+                nombre: mainTicket.ciudadanoNombre || '',
+                apellido: mainTicket.ciudadanoApellido || '',
+                destinoTipo: mainTicket.etapa === 'TRIADA' ? 'TRIADA' : 'CAJA',
+                cajaNumero: mainTicket.cajaNumero || 1
+              }
+            };
+
+            this.listeners.forEach(cb => {
+              try {
+                cb(simulatedCallEvent as any);
+              } catch (err) {
+                console.error('Error en callback de llamado de simulación:', err);
+              }
+            });
+          }
+        }
+
+        this.listeners.forEach(cb => {
+          try {
+            cb(simulatedEvent as any);
+          } catch (err) {
+            console.error('Error en callback de suscriptor de simulación:', err);
+          }
+        });
+      } catch (err) {
+        console.warn('[WS CLIENT] Falló polling de respaldo:', err);
+      }
+    }, 2500);
+  }
+
+  private stopPollingFallback() {
+    if (this.pollingIntervalId) {
+      clearInterval(this.pollingIntervalId);
+      this.pollingIntervalId = null;
+    }
   }
 
   public onStatusChange(callback: StatusCallback): () => void {

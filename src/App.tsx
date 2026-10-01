@@ -340,6 +340,22 @@ export default function App() {
     };
   }, [aplicarSnapshot, recargarEstadoInicial, currentSedeId, cajaId, currentView, adminTab]);
 
+  // Polling de respaldo cuando no se está conectado por WebSocket (ej: en plataformas serverless como Vercel)
+  useEffect(() => {
+    let pollingInterval: any = null;
+
+    if (connectionStatus !== 'CONNECTED') {
+      console.log('[POLLING FALLBACK] WebSocket desconectado. Iniciando sondeo periódico para tiempo real...');
+      pollingInterval = setInterval(() => {
+        recargarEstadoInicial();
+      }, 4000); // Polling cada 4 segundos
+    }
+
+    return () => {
+      if (pollingInterval) clearInterval(pollingInterval);
+    };
+  }, [connectionStatus, recargarEstadoInicial]);
+
   const toggleAudio = () => {
     const nuevo = !audioEnabled;
     setAudioEnabled(nuevo);
