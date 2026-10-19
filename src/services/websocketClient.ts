@@ -12,7 +12,7 @@ class WebSocketClient {
   private reconnectTimer: any = null;
   private pingInterval: any = null;
   private currentRegistration: { role: RolUsuario | 'KIOSK'; usuarioId?: string | null; cajaId?: number | null; sedeId?: string } | null = null;
-  private audioEnabled = true;
+  private audioEnabled = false;
   private audioFilter: 'ALL' | 'CAJA' | 'TRIADA' = 'ALL';
 
   constructor() {

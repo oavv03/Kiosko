@@ -24,7 +24,15 @@ export const SEDES: Sede[] = [
   { id: 'arraijan', nombre: 'Regional Especial de Arraiján', ubicacion: 'Arraiján', configPantallas: 'ALTERNADO' },
 ];
 
-export type RolUsuario = 'SUPER_ADMIN' | 'ADMINISTRADOR' | 'FUNCIONARIO' | 'PANTALLA';
+export type RolUsuario = 
+  | 'SUPER_ADMIN' 
+  | 'ADMINISTRADOR' 
+  | 'FUNCIONARIO' 
+  | 'PANTALLA' 
+  | 'FUNCIONARIO_CAJA' 
+  | 'FUNCIONARIO_TRIADA'
+  | 'SUPERVISOR_CAJA'
+  | 'SUPERVISOR_TRIADA';
 
 export type EstadoCaja = 'DISPONIBLE' | 'OCUPADA' | 'INACTIVA' | 'DESCONECTADA';
 
@@ -88,6 +96,24 @@ export interface ConfiguracionVisual {
 
   pantallaFondoTipo: 'color' | 'degradado' | 'imagen';
   pantallaFondoValor: string;
+
+  // Personalización del Ticket Impreso y Kiosko
+  ticketLogoUrl?: string;
+  ticketMostrarLogo?: boolean;
+  ticketLogoTamano?: 'pequeno' | 'mediano' | 'grande';
+  ticketEncabezado?: string;
+  ticketSubencabezado?: string;
+  ticketMensajeEspera?: string;
+  ticketPieMensaje?: string;
+  ticketNotaPie?: string;
+  ticketMostrarCiudadano?: boolean;
+  ticketMostrarTramite?: boolean;
+  ticketMostrarFechaHora?: boolean;
+  ticketMostrarCodigoBarras?: boolean;
+  ticketMostrarQr?: boolean;
+  ticketAnchoPapel?: '58mm' | '80mm';
+  ticketEstiloFuente?: 'monospace' | 'sans-serif';
+  ticketEspaciado?: 'compacto' | 'normal' | 'amplio';
 }
 
 export interface Usuario {
@@ -133,8 +159,11 @@ export interface Ticket {
   usuarioId?: string | null;
   usuarioNombre?: string | null;
   etapa?: 'CAJA' | 'TRIADA'; // Etapa actual del recorrido
+  area?: 'CAJA' | 'TRIADA'; // Área operativa asignada
   preferencial?: boolean; // Indica si es atención preferencial (Adultos mayores, discapacidad, etc.)
   sedeId?: string;
+  cajasHistorialIds?: number[];
+  estacionTexto?: string;
   
   // Timestamps para latencia y estadísticas
   fechaCreacion: string; // ticket_created_at

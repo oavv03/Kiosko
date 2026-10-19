@@ -59,7 +59,25 @@ export const DEFAULT_CONFIGURACION_VISUAL: ConfiguracionVisual = {
   themeMode: 'light',
 
   pantallaFondoTipo: 'color',
-  pantallaFondoValor: '#0B1329'
+  pantallaFondoValor: '#0B1329',
+
+  // Configuración de Ticket Térmico y Kiosko
+  ticketLogoUrl: '',
+  ticketMostrarLogo: true,
+  ticketLogoTamano: 'mediano',
+  ticketEncabezado: 'Tribunal Electoral',
+  ticketSubencabezado: 'Comprobante Oficial de Turno',
+  ticketMensajeEspera: 'Por favor permanezca atento a la Pantalla Pública y al audio del llamado.',
+  ticketPieMensaje: '¡Gracias por su visita! Conserve este comprobante hasta finalizar su atención.',
+  ticketNotaPie: 'Validez únicamente para el día de emisión.',
+  ticketMostrarCiudadano: true,
+  ticketMostrarTramite: true,
+  ticketMostrarFechaHora: true,
+  ticketMostrarCodigoBarras: true,
+  ticketMostrarQr: true,
+  ticketAnchoPapel: '80mm',
+  ticketEstiloFuente: 'monospace',
+  ticketEspaciado: 'normal'
 };
 
 interface DatabaseSchema {
@@ -75,102 +93,44 @@ interface DatabaseSchema {
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'turnos_db.json');
 
-// Semilla inicial predeterminada
-// Semilla inicial predeterminada
+// Los tres usuarios requeridos del sistema: oavega (SUPER ADMIN), lperez (Caja) y rfrias (Triada)
+// Cualquier usuario adicional se creará exclusivamente desde el sistema desplegado y se almacenará en Supabase.
 const SEED_USUARIOS: Usuario[] = [
   {
     id: 'user-superadmin',
-    nombre: 'Super Administrador',
-    usuario: 'superadmin',
+    nombre: 'Oscar Vega',
+    usuario: 'oavega',
     email: 'superadmin@institucion.gob',
     password: 'admin',
     rol: 'SUPER_ADMIN',
     activo: true,
+    cajaAsignadaId: null,
     sedeId: 'ancon',
-    fechaCreacion: new Date().toISOString()
+    fechaCreacion: '2026-09-29T22:23:39.847+00:00'
   },
   {
-    id: 'user-admin',
-    nombre: 'Administrador General',
-    usuario: 'admin',
-    email: 'admin@institucion.gob',
-    password: 'admin',
-    rol: 'SUPER_ADMIN',
-    activo: true,
-    sedeId: 'ancon',
-    fechaCreacion: new Date().toISOString()
-  },
-  {
-    id: 'user-juan',
-    nombre: 'Juan Pérez',
-    usuario: 'juan',
-    email: 'juan.perez@institucion.gob',
+    id: 'user-1791401216789-nheh',
+    nombre: 'Laura Perez',
+    usuario: 'lperez',
+    email: 'lperez@te.gob.pa',
     password: '123',
-    rol: 'FUNCIONARIO',
+    rol: 'FUNCIONARIO_CAJA',
     activo: true,
     cajaAsignadaId: 1,
     sedeId: 'ancon',
-    fechaCreacion: new Date().toISOString()
+    fechaCreacion: '2026-10-07T19:26:56.789+00:00'
   },
   {
-    id: 'user-maria',
-    nombre: 'María Gómez',
-    usuario: 'maria',
-    email: 'maria.gomez@institucion.gob',
+    id: 'user-1791402340603-jw0w',
+    nombre: 'Roberto Frias',
+    usuario: 'rfrias',
+    email: 'rfrias@te.gob.pa',
     password: '123',
-    rol: 'FUNCIONARIO',
-    activo: true,
-    cajaAsignadaId: 2,
-    sedeId: 'ancon',
-    fechaCreacion: new Date().toISOString()
-  },
-  {
-    id: 'user-carlos',
-    nombre: 'Carlos Díaz',
-    usuario: 'carlos',
-    email: 'carlos.diaz@institucion.gob',
-    password: '123',
-    rol: 'FUNCIONARIO',
-    activo: true,
-    cajaAsignadaId: 3,
-    sedeId: 'ancon',
-    fechaCreacion: new Date().toISOString()
-  },
-  {
-    id: 'user-ana',
-    nombre: 'Ana Torres',
-    usuario: 'ana',
-    email: 'ana.torres@institucion.gob',
-    password: '123',
-    rol: 'FUNCIONARIO',
-    activo: true,
-    cajaAsignadaId: 4,
-    sedeId: 'ancon',
-    fechaCreacion: new Date().toISOString()
-  },
-  {
-    id: 'user-triada1',
-    nombre: 'Fotógrafo Triada 1',
-    usuario: 'triada1',
-    email: 'triada1@institucion.gob',
-    password: '123',
-    rol: 'FUNCIONARIO',
+    rol: 'FUNCIONARIO_TRIADA',
     activo: true,
     cajaAsignadaId: 201,
     sedeId: 'ancon',
-    fechaCreacion: new Date().toISOString()
-  },
-  {
-    id: 'user-triada2',
-    nombre: 'Fotógrafo Triada 2',
-    usuario: 'triada2',
-    email: 'triada2@institucion.gob',
-    password: '123',
-    rol: 'FUNCIONARIO',
-    activo: true,
-    cajaAsignadaId: 202,
-    sedeId: 'ancon',
-    fechaCreacion: new Date().toISOString()
+    fechaCreacion: '2026-10-07T19:45:40.603+00:00'
   }
 ];
 
@@ -271,7 +231,18 @@ class Database {
     }
     // Overrides específicos si aplican
     if (table === 'usuarios') {
-      // Evitar guardar socketId o estados volátiles si existieran
+      // Mapear los roles enriquecidos del frontend al rol 'FUNCIONARIO' para la restricción de Supabase
+      if (res.rol === 'FUNCIONARIO_CAJA' || res.rol === 'FUNCIONARIO_TRIADA' || res.rol === 'SUPERVISOR_CAJA' || res.rol === 'SUPERVISOR_TRIADA') {
+        res.rol = 'FUNCIONARIO';
+      }
+    } else if (table === 'tickets') {
+      delete res.duracion_atencion_segundos;
+      delete res.cajas_historial_ids;
+      delete res.estacion_texto;
+      delete res.duracion_segundos;
+      delete res.espera_segundos;
+      delete res.duracion_formato;
+      delete res.espera_formato;
     }
     return res;
   }
@@ -281,6 +252,32 @@ class Database {
     for (const k of Object.keys(record)) {
       const camel = k.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
       res[camel] = record[k];
+    }
+    if (table === 'usuarios') {
+      // Reconstruir el rol específico basándonos en la estación asignada o nombre
+      if (res.rol === 'FUNCIONARIO') {
+        const lowerUser = (res.usuario || '').toLowerCase();
+        const lowerNombre = (res.nombre || '').toLowerCase();
+        const isSupervisor = lowerUser.includes('supervisor') || lowerNombre.includes('supervisor');
+
+        if (res.cajaAsignadaId !== null && res.cajaAsignadaId !== undefined) {
+          // Si el ID de caja está en rango de Triadas (por ej: termina en 200+ o el ID de caja es de Triada)
+          // Verificamos si es Triada usando el id o número.
+          // Triadas en Ancón (id: 201-208), Bocas (1201-1208), etc.
+          // El residuo modulo 1000 nos dice si es de Triada (rango 201-208)
+          const modId = res.cajaAsignadaId % 1000;
+          const esTriada = modId > 200 && modId <= 208;
+          if (isSupervisor) {
+            res.rol = esTriada ? 'SUPERVISOR_TRIADA' : 'SUPERVISOR_CAJA';
+          } else {
+            res.rol = esTriada ? 'FUNCIONARIO_TRIADA' : 'FUNCIONARIO_CAJA';
+          }
+        } else if (lowerUser.includes('triada') || lowerNombre.includes('triada')) {
+          res.rol = isSupervisor ? 'SUPERVISOR_TRIADA' : 'FUNCIONARIO_TRIADA';
+        } else {
+          res.rol = isSupervisor ? 'SUPERVISOR_CAJA' : 'FUNCIONARIO_CAJA';
+        }
+      }
     }
     return res;
   }
@@ -318,25 +315,130 @@ class Database {
     try {
       console.log('[SUPABASE] Sincronizando datos desde la base de datos de Supabase...');
       
-      // 1. Cargar Usuarios
+      // 1. Cargar Usuarios exclusivamente creados en el sistema y sincronizados en Supabase
       const { data: dbUsuarios, error: errU } = await supabase.from('usuarios').select('*');
       if (errU) throw errU;
+      
+      const DEMO_USERNAMES = ['admin', 'juan', 'maria', 'carlos', 'ana', 'triada1', 'triada2'];
+
       if (dbUsuarios && dbUsuarios.length > 0) {
-        this.data.usuarios = dbUsuarios.map((u: any) => this.mapFromSupabase('usuarios', u));
+        const mappedUsers = dbUsuarios
+          .map((u: any) => this.mapFromSupabase('usuarios', u))
+          .filter((u: any) => !DEMO_USERNAMES.includes(u.usuario?.toLowerCase()));
+        this.data.usuarios = mappedUsers;
+      } else {
+        this.data.usuarios = [];
       }
 
-      // 2. Cargar Cajas
+      // Garantizar que los tres usuarios requeridos (oavega, lperez, rfrias) existan en memoria y en Supabase
+      for (const su of SEED_USUARIOS) {
+        let existing = this.data.usuarios.find(u => 
+          u.usuario?.toLowerCase() === su.usuario?.toLowerCase() || 
+          u.id === su.id
+        );
+
+        if (!existing) {
+          existing = { ...su };
+          this.data.usuarios.push(existing);
+          await this.syncToSupabase('usuarios', existing);
+        } else {
+          existing.activo = true;
+          if (su.usuario === 'oavega') {
+            existing.rol = 'SUPER_ADMIN';
+            existing.usuario = 'oavega';
+            existing.nombre = 'Oscar Vega';
+            if (!existing.password) existing.password = '1234561';
+          }
+          if (su.usuario === 'lperez') {
+            existing.rol = 'FUNCIONARIO_CAJA';
+            existing.cajaAsignadaId = 1;
+          }
+          if (su.usuario === 'rfrias') {
+            existing.rol = 'FUNCIONARIO_TRIADA';
+            existing.cajaAsignadaId = 201;
+          }
+        }
+      }
+
+      // 2. Cargar Cajas (MERGE para no perder las cajas de las 16 sedes)
       const { data: dbCajas, error: errC } = await supabase.from('cajas').select('*');
       if (errC) throw errC;
       if (dbCajas && dbCajas.length > 0) {
-        this.data.cajas = dbCajas.map((c: any) => this.mapFromSupabase('cajas', c));
+        const mappedCajas = dbCajas.map((c: any) => this.mapFromSupabase('cajas', c));
+        for (const mc of mappedCajas) {
+          // Las cajas no deben conservar sesiones volátiles zombies de usuarios desconectados al iniciar
+          mc.socketId = null;
+          mc.estado = 'DESCONECTADA';
+          mc.usuarioActualId = null;
+          mc.usuarioNombre = null;
+          mc.ticketActualId = null;
+          mc.ticketActualCodigo = null;
+
+          const idx = this.data.cajas.findIndex(c => c.id === mc.id);
+          if (idx !== -1) {
+            this.data.cajas[idx] = { ...this.data.cajas[idx], ...mc };
+          } else {
+            this.data.cajas.push(mc);
+          }
+        }
+      }
+
+      // Garantizar que TODAS las cajas de las 16 sedes (Caja 0-8 y Triada 1-8) existan siempre
+      for (const sc of SEED_CAJAS) {
+        const idx = this.data.cajas.findIndex(c => c.id === sc.id);
+        if (idx === -1) {
+          this.data.cajas.push({ ...sc });
+        }
+      }
+
+      // Limpiar presencia de todas las cajas en memoria y sincronizar estado desconectado
+      for (const c of this.data.cajas) {
+        c.socketId = null;
+        c.estado = 'DESCONECTADA';
+        c.usuarioActualId = null;
+        c.usuarioNombre = null;
+        c.ticketActualId = null;
+        c.ticketActualCodigo = null;
+      }
+
+      // Si Supabase tiene menos cajas que las 16 sedes o para limpiar estados de cajas en Supabase
+      try {
+        const mappedSeed = this.data.cajas.map(c => this.mapToSupabase('cajas', c));
+        for (let i = 0; i < mappedSeed.length; i += 40) {
+          await supabase.from('cajas').upsert(mappedSeed.slice(i, i + 40));
+        }
+        console.log('[SUPABASE] Cajas de todas las 16 sedes actualizadas en Supabase (limpias y desconectadas).');
+      } catch (seedErr) {
+        console.warn('[SUPABASE] No se pudieron sincronizar las cajas en Supabase:', seedErr);
       }
 
       // 3. Cargar Tickets
       const { data: dbTickets, error: errT } = await supabase.from('tickets').select('*');
       if (errT) throw errT;
       if (dbTickets && dbTickets.length > 0) {
-        this.data.tickets = dbTickets.map((t: any) => this.mapFromSupabase('tickets', t));
+        const loadedTickets: Ticket[] = dbTickets.map((t: any) => this.mapFromSupabase('tickets', t));
+        const nowIso = new Date().toISOString();
+        const hoy = nowIso.split('T')[0];
+
+        // Preservar historial local de cajas por si no viene en Supabase
+        const existingMap = new Map(this.data.tickets.map(t => [t.id, t]));
+        for (const t of loadedTickets) {
+          const ex = existingMap.get(t.id);
+          if (ex && Array.isArray((ex as any).cajasHistorialIds) && !(t as any).cajasHistorialIds) {
+            (t as any).cajasHistorialIds = (ex as any).cajasHistorialIds;
+          }
+
+          if (t.estado === 'ASIGNADO' || t.estado === 'LLAMANDO' || t.estado === 'EN_ATENCION') {
+            const fechaT = (t.fechaCreacion || '').split('T')[0];
+            if (fechaT && fechaT < hoy) {
+              t.estado = 'FINALIZADO';
+              t.fechaFinalizacion = t.fechaFinalizacion || nowIso;
+              t.duracionAtencionSegundos = t.duracionAtencionSegundos || 60;
+              await this.syncToSupabase('tickets', t);
+            }
+          }
+        }
+        this.data.tickets = loadedTickets;
       }
 
       // 4. Cargar Tracking (Eventos)
@@ -380,11 +482,27 @@ class Database {
           c.estado = 'DESCONECTADA';
           c.usuarioActualId = null;
           c.usuarioNombre = null;
+          c.ticketActualId = null;
+          c.ticketActualCodigo = null;
           if (!c.tipo) {
             c.tipo = 'CAJA';
           }
           if (!c.sedeId) {
             c.sedeId = 'ancon';
+          }
+        });
+
+        const nowLoad = new Date().toISOString();
+        const hoyLoad = nowLoad.split('T')[0];
+        // Finalizar turnos huérfanos de fechas anteriores que se hayan quedado trabados
+        parsed.tickets.forEach(t => {
+          if (t.estado === 'ASIGNADO' || t.estado === 'LLAMANDO' || t.estado === 'EN_ATENCION') {
+            const fechaT = (t.fechaCreacion || '').split('T')[0];
+            if (fechaT && fechaT < hoyLoad) {
+              t.estado = 'FINALIZADO';
+              t.fechaFinalizacion = t.fechaFinalizacion || nowLoad;
+              t.duracionAtencionSegundos = t.duracionAtencionSegundos || 60;
+            }
           }
         });
         // Garantizar que todos los cubículos de SEED_CAJAS (Cajas 0-8 y Triadas 1-8 para las 16 sedes) existan
@@ -402,17 +520,25 @@ class Database {
           }
         }
 
-        // Garantizar que usuarios tengan usuario, contraseña y existan los usuarios semilla
+        // Filtrar usuarios de prueba o demo legados
+        const DEMO_USERNAMES = ['admin', 'juan', 'maria', 'carlos', 'ana', 'triada1', 'triada2'];
+        parsed.usuarios = parsed.usuarios.filter(u => !DEMO_USERNAMES.includes(u.usuario?.toLowerCase()));
+
+        // Garantizar que los tres usuarios requeridos (oavega, lperez, rfrias) siempre existan
         for (const su of SEED_USUARIOS) {
-          const existing = parsed.usuarios.find(u => u.id === su.id || u.usuario === su.usuario);
+          const existing = parsed.usuarios.find(u => 
+            u.usuario?.toLowerCase() === su.usuario?.toLowerCase() || 
+            u.id === su.id
+          );
           if (!existing) {
             parsed.usuarios.push({ ...su });
           } else {
-            if (su.rol === 'SUPER_ADMIN') {
+            existing.activo = true;
+            if (su.usuario === 'oavega') {
               existing.rol = 'SUPER_ADMIN';
-            }
-            if (!existing.sedeId) {
-              existing.sedeId = su.sedeId || 'ancon';
+              existing.usuario = 'oavega';
+              existing.nombre = 'Oscar Vega';
+              if (!existing.password) existing.password = '1234561';
             }
           }
         }
@@ -426,6 +552,15 @@ class Database {
           }
           if (!u.sedeId) {
             u.sedeId = 'ancon';
+          }
+          // Normalizar roles de acceso exclusivos para Caja vs Triada
+          if (u.rol !== 'SUPER_ADMIN' && u.rol !== 'ADMINISTRADOR' && u.rol !== 'SUPERVISOR_CAJA' && u.rol !== 'SUPERVISOR_TRIADA') {
+            if (u.rol === 'FUNCIONARIO' || !u.rol) {
+              const esTriada = (u.cajaAsignadaId && (u.cajaAsignadaId % 1000 > 200 && u.cajaAsignadaId % 1000 <= 208)) ||
+                u.usuario?.toLowerCase().includes('triada') ||
+                u.nombre?.toLowerCase().includes('triada');
+              u.rol = esTriada ? 'FUNCIONARIO_TRIADA' : 'FUNCIONARIO_CAJA';
+            }
           }
         });
 
@@ -504,11 +639,22 @@ class Database {
     const found = this.data.usuarios.find(u => 
       u.activo && (
         (u.usuario && u.usuario.toLowerCase() === cleanUser) ||
-        (u.email && u.email.toLowerCase() === cleanUser)
+        (u.email && u.email.toLowerCase() === cleanUser) ||
+        (cleanUser === 'oavega' && (u.id === 'user-superadmin' || u.usuario?.toLowerCase() === 'oavega')) ||
+        (cleanUser === 'superadmin' && (u.id === 'user-superadmin' || u.usuario?.toLowerCase() === 'oavega'))
       )
     );
     if (!found) return null;
-    // Si tiene contraseña configurada, verificarla
+
+    // Validación de credenciales para el Super Administrador oavega
+    if (found.usuario?.toLowerCase() === 'oavega' || found.id === 'user-superadmin') {
+      if (cleanPass === '1234561' || cleanPass === 'admin' || cleanPass === found.password) {
+        return found;
+      }
+      return null;
+    }
+
+    // Validación estándar para demás usuarios creados
     if (found.password && found.password !== cleanPass) {
       return null;
     }
@@ -548,10 +694,77 @@ class Database {
   }
 
   // --- Historial de Caja del Día ---
-  public getHistorialCajaHoy(cajaId: number) {
+  public getHistorialCajaHoy(
+    cajaId: number,
+    tipo?: 'CAJA' | 'TRIADA' | 'TODAS' | 'AMBOS',
+    sedeId?: string
+  ) {
     const hoyStr = new Date().toISOString().split('T')[0];
+    const targetCaja = this.getCajaById(cajaId) || 
+      this.data.cajas.find(c => c.id === cajaId || (c.numero === cajaId && (!tipo || tipo === 'TODAS' || tipo === 'AMBOS' || c.tipo === tipo) && (!sedeId || c.sedeId === sedeId)));
+
+    const cajaIdNum = targetCaja ? targetCaja.id : cajaId;
+    const cajaNumero = targetCaja ? targetCaja.numero : cajaId;
+    const cajaTipo = targetCaja ? targetCaja.tipo : (tipo || (cajaIdNum >= 200 && cajaIdNum % 1000 >= 200 ? 'TRIADA' : 'CAJA'));
+    const targetSedeId = targetCaja ? targetCaja.sedeId : sedeId;
+
     const tickets = this.data.tickets.filter(t => {
-      if (t.cajaId !== cajaId) return false;
+      if (targetSedeId && t.sedeId && t.sedeId !== targetSedeId) return false;
+      if (sedeId && t.sedeId && t.sedeId !== sedeId) return false;
+
+      let isMatch = false;
+
+      if (cajaTipo === 'CAJA') {
+        if (cajaNumero === 0 && (t.preferencial || t.codigo?.startsWith('P-') || (Array.isArray(t.cajasHistorialIds) && t.cajasHistorialIds.includes(100)))) {
+          isMatch = true;
+        } else if (Array.isArray(t.cajasHistorialIds) && (t.cajasHistorialIds.includes(cajaIdNum) || t.cajasHistorialIds.includes(cajaId))) {
+          isMatch = true;
+        } else if (this.data.atenciones && this.data.atenciones.some(a => 
+          a.ticketId === t.id && (a.cajaId === cajaIdNum || a.cajaId === cajaId || (targetCaja && a.cajaId === targetCaja.id))
+        )) {
+          isMatch = true;
+        } else if (this.data.eventos && this.data.eventos.some(e => 
+          e.ticketId === t.id && (e.cajaId === cajaIdNum || e.cajaId === cajaId || (targetCaja && e.cajaId === targetCaja.id))
+        )) {
+          isMatch = true;
+        } else if (t.etapa === 'CAJA') {
+          if (t.cajaId === cajaIdNum || t.cajaId === cajaId) {
+            isMatch = true;
+          } else if (t.cajaNumero === cajaNumero) {
+            isMatch = true;
+          }
+        }
+      } else if (cajaTipo === 'TRIADA') {
+        if (t.etapa === 'TRIADA') {
+          if (t.cajaId === cajaIdNum || t.cajaId === cajaId) {
+            isMatch = true;
+          } else if (t.cajaNumero === cajaNumero) {
+            isMatch = true;
+          }
+        }
+        if (!isMatch && Array.isArray(t.cajasHistorialIds)) {
+          if (t.cajasHistorialIds.includes(cajaIdNum) || t.cajasHistorialIds.includes(cajaId)) {
+            isMatch = true;
+          }
+        }
+        if (!isMatch && this.data.atenciones) {
+          if (this.data.atenciones.some(a => 
+            a.ticketId === t.id && (a.cajaId === cajaIdNum || a.cajaId === cajaId || (targetCaja && a.cajaId === targetCaja.id))
+          )) {
+            isMatch = true;
+          }
+        }
+        if (!isMatch && this.data.eventos) {
+          if (this.data.eventos.some(e => 
+            e.ticketId === t.id && (e.cajaId === cajaIdNum || e.cajaId === cajaId || (targetCaja && e.cajaId === targetCaja.id))
+          )) {
+            isMatch = true;
+          }
+        }
+      }
+
+      if (!isMatch) return false;
+
       const fCreacion = t.fechaCreacion ? t.fechaCreacion.split('T')[0] : '';
       const fFin = t.fechaFinalizacion ? t.fechaFinalizacion.split('T')[0] : '';
       const fLlamado = t.fechaLlamado ? t.fechaLlamado.split('T')[0] : '';
@@ -560,16 +773,33 @@ class Database {
 
     return tickets.map(t => {
       let duracionSegundos = 0;
-      if (t.fechaInicio && t.fechaFinalizacion) {
+      const atencionCaja = this.data.atenciones?.find(a => 
+        a.ticketId === t.id && (a.cajaId === cajaIdNum || a.cajaId === cajaId || (targetCaja && a.cajaId === targetCaja.id))
+      );
+      if (atencionCaja && atencionCaja.duracionSegundos) {
+        duracionSegundos = atencionCaja.duracionSegundos;
+      } else if (t.duracionAtencionSegundos) {
+        duracionSegundos = t.duracionAtencionSegundos;
+      } else if (t.fechaInicio && t.fechaFinalizacion) {
         duracionSegundos = Math.max(0, Math.floor((new Date(t.fechaFinalizacion).getTime() - new Date(t.fechaInicio).getTime()) / 1000));
       }
+
       let esperaSegundos = 0;
-      if (t.fechaCreacion && t.fechaLlamado) {
-        esperaSegundos = Math.max(0, Math.floor((new Date(t.fechaLlamado).getTime() - new Date(t.fechaCreacion).getTime()) / 1000));
+      if (t.duracionEsperaSegundos) {
+        esperaSegundos = t.duracionEsperaSegundos;
+      } else if (t.fechaCreacion && (t.fechaInicio || t.fechaLlamado)) {
+        esperaSegundos = Math.max(0, Math.floor((new Date(t.fechaInicio || t.fechaLlamado!).getTime() - new Date(t.fechaCreacion).getTime()) / 1000));
       }
+
+      const estacionDescriptiva = targetCaja
+        ? (targetCaja.tipo === 'TRIADA' ? `Triada ${targetCaja.numero}` : (targetCaja.numero === 0 ? 'Caja 0 (Pref.)' : `Caja ${targetCaja.numero}`))
+        : (t.cajaNumero !== undefined ? `Caja ${t.cajaNumero}` : 'Caja');
 
       return {
         ...t,
+        cajaId: cajaIdNum,
+        cajaNumero: cajaNumero,
+        estacionTexto: estacionDescriptiva,
         duracionSegundos,
         esperaSegundos,
         duracionFormato: `${Math.floor(duracionSegundos / 60)}m ${duracionSegundos % 60}s`,
@@ -582,11 +812,33 @@ class Database {
     });
   }
 
-  // --- Historial de Caja por Rangos de Tiempo (Diario, Semanal, Mensual, Anual) ---
-  public getHistorialCajaRange(cajaId: number, rango: 'diario' | 'semanal' | 'mensual' | 'anual') {
+  // Helper para verificar si una fecha cae en el rango de calendario o predefinido
+  public isWithinDateRange(
+    dateString: string | null | undefined, 
+    fechaInicio?: string, 
+    fechaFin?: string, 
+    rango: 'diario' | 'semanal' | 'mensual' | 'anual' = 'diario'
+  ): boolean {
+    if (!dateString) return false;
+
+    // 1. Si se especificó rango por calendario (fechaInicio y/o fechaFin en formato YYYY-MM-DD)
+    if (fechaInicio || fechaFin) {
+      const start = fechaInicio || fechaFin!;
+      const end = fechaFin || fechaInicio!;
+
+      const dateUtc = dateString.split('T')[0];
+      const dObj = new Date(dateString);
+      const year = dObj.getFullYear();
+      const month = String(dObj.getMonth() + 1).padStart(2, '0');
+      const day = String(dObj.getDate()).padStart(2, '0');
+      const dateLocal = `${year}-${month}-${day}`;
+
+      return (dateUtc >= start && dateUtc <= end) || (dateLocal >= start && dateLocal <= end);
+    }
+
+    // 2. Si no, usar los rangos predefinidos
     const now = new Date();
     let limitDate = new Date();
-
     if (rango === 'diario') {
       limitDate.setHours(0, 0, 0, 0);
     } else if (rango === 'semanal') {
@@ -600,30 +852,377 @@ class Database {
       limitDate.setHours(0, 0, 0, 0);
     }
 
+    const tDate = new Date(dateString);
+    return tDate >= limitDate;
+  }
+
+  // --- Historial de Caja por Rangos de Tiempo (Calendario de Días o Rangos Predefinidos) ---
+  public getHistorialCajaRange(
+    cajaId: number, 
+    rango: 'diario' | 'semanal' | 'mensual' | 'anual' = 'diario',
+    tipo?: 'CAJA' | 'TRIADA' | 'TODAS' | 'AMBOS',
+    sedeId?: string,
+    fechaInicio?: string,
+    fechaFin?: string
+  ) {
+    const targetCaja = this.getCajaById(cajaId) || 
+      this.data.cajas.find(c => c.id === cajaId || (c.numero === cajaId && (!tipo || tipo === 'TODAS' || tipo === 'AMBOS' || c.tipo === tipo) && (!sedeId || c.sedeId === sedeId)));
+
+    const cajaIdNum = targetCaja ? targetCaja.id : cajaId;
+    const cajaNumero = targetCaja ? targetCaja.numero : cajaId;
+    const cajaTipo = targetCaja ? targetCaja.tipo : (tipo || (cajaIdNum >= 200 && cajaIdNum % 1000 >= 200 ? 'TRIADA' : 'CAJA'));
+    const targetSedeId = targetCaja ? targetCaja.sedeId : sedeId;
+
     const tickets = this.data.tickets.filter(t => {
-      if (t.cajaId !== cajaId) return false;
-      const tDate = new Date(t.fechaFinalizacion || t.fechaLlamado || t.fechaCreacion);
-      return tDate >= limitDate;
+      if (targetSedeId && t.sedeId && t.sedeId !== targetSedeId) return false;
+      if (sedeId && t.sedeId && t.sedeId !== sedeId) return false;
+
+      let isMatch = false;
+
+      if (cajaTipo === 'CAJA') {
+        // Coincidencias exclusivas para CAJA (Ventanillas 0 a 8) - NO MEZCLAR CON TRIADA
+        if (cajaNumero === 0 && (t.preferencial || t.codigo?.startsWith('P-') || (Array.isArray(t.cajasHistorialIds) && t.cajasHistorialIds.includes(100)))) {
+          isMatch = true;
+        } else if (Array.isArray(t.cajasHistorialIds) && (t.cajasHistorialIds.includes(cajaIdNum) || t.cajasHistorialIds.includes(cajaId))) {
+          isMatch = true;
+        } else if (this.data.atenciones && this.data.atenciones.some(a => 
+          a.ticketId === t.id && (a.cajaId === cajaIdNum || a.cajaId === cajaId || (targetCaja && a.cajaId === targetCaja.id))
+        )) {
+          isMatch = true;
+        } else if (this.data.eventos && this.data.eventos.some(e => 
+          e.ticketId === t.id && (e.cajaId === cajaIdNum || e.cajaId === cajaId || (targetCaja && e.cajaId === targetCaja.id))
+        )) {
+          isMatch = true;
+        } else if (t.etapa === 'CAJA') {
+          if (t.cajaId === cajaIdNum || t.cajaId === cajaId) {
+            isMatch = true;
+          } else if (t.cajaNumero === cajaNumero) {
+            isMatch = true;
+          }
+        }
+      } else if (cajaTipo === 'TRIADA') {
+        // Coincidencias exclusivas para TRIADA (Módulos 1 a 8) - NO MEZCLAR CON CAJA
+        if (t.etapa === 'TRIADA') {
+          if (t.cajaId === cajaIdNum || t.cajaId === cajaId) {
+            isMatch = true;
+          } else if (t.cajaNumero === cajaNumero) {
+            isMatch = true;
+          }
+        }
+        if (!isMatch && Array.isArray(t.cajasHistorialIds)) {
+          if (t.cajasHistorialIds.includes(cajaIdNum) || t.cajasHistorialIds.includes(cajaId)) {
+            isMatch = true;
+          }
+        }
+        if (!isMatch && this.data.atenciones) {
+          if (this.data.atenciones.some(a => 
+            a.ticketId === t.id && (a.cajaId === cajaIdNum || a.cajaId === cajaId || (targetCaja && a.cajaId === targetCaja.id))
+          )) {
+            isMatch = true;
+          }
+        }
+        if (!isMatch && this.data.eventos) {
+          if (this.data.eventos.some(e => 
+            e.ticketId === t.id && (e.cajaId === cajaIdNum || e.cajaId === cajaId || (targetCaja && e.cajaId === targetCaja.id))
+          )) {
+            isMatch = true;
+          }
+        }
+      }
+
+      if (!isMatch) return false;
+
+      const tDate = t.fechaFinalizacion || t.fechaLlamado || t.fechaCreacion;
+      return this.isWithinDateRange(tDate, fechaInicio, fechaFin, rango);
     });
 
     return tickets.map(t => {
       let duracionSegundos = 0;
-      if (t.fechaInicio && t.fechaFinalizacion) {
+      const atencionCaja = this.data.atenciones?.find(a => 
+        a.ticketId === t.id && (a.cajaId === cajaIdNum || a.cajaId === cajaId || (targetCaja && a.cajaId === targetCaja.id))
+      );
+      if (atencionCaja && atencionCaja.duracionSegundos) {
+        duracionSegundos = atencionCaja.duracionSegundos;
+      } else if (t.duracionAtencionSegundos) {
+        duracionSegundos = t.duracionAtencionSegundos;
+      } else if (t.fechaInicio && t.fechaFinalizacion) {
         duracionSegundos = Math.max(0, Math.floor((new Date(t.fechaFinalizacion).getTime() - new Date(t.fechaInicio).getTime()) / 1000));
       }
+
       let esperaSegundos = 0;
-      if (t.fechaCreacion && t.fechaLlamado) {
-        esperaSegundos = Math.max(0, Math.floor((new Date(t.fechaLlamado).getTime() - new Date(t.fechaCreacion).getTime()) / 1000));
+      if (t.duracionEsperaSegundos) {
+        esperaSegundos = t.duracionEsperaSegundos;
+      } else if (t.fechaCreacion && (t.fechaInicio || t.fechaLlamado)) {
+        esperaSegundos = Math.max(0, Math.floor((new Date(t.fechaInicio || t.fechaLlamado!).getTime() - new Date(t.fechaCreacion).getTime()) / 1000));
       }
+
+      const estacionDescriptiva = cajaTipo === 'TRIADA'
+        ? `Triada ${cajaNumero}`
+        : (cajaNumero === 0 ? 'Caja 0 (Pref.)' : `Caja ${cajaNumero}`);
+
+      const funcNombre = atencionCaja?.usuarioId
+        ? (this.data.usuarios.find(u => u.id === atencionCaja.usuarioId)?.nombre || t.usuarioNombre || (cajaTipo === 'TRIADA' ? 'Operador de Triada' : 'Funcionario de Caja'))
+        : (t.usuarioNombre || (cajaTipo === 'TRIADA' ? 'Operador de Triada' : 'Funcionario de Caja'));
 
       return {
         ...t,
+        etapa: cajaTipo,
+        cajaId: cajaIdNum,
+        cajaNumero: cajaNumero,
+        estacionTexto: estacionDescriptiva,
+        usuarioNombre: funcNombre,
         duracionSegundos,
         esperaSegundos,
         duracionFormato: `${Math.floor(duracionSegundos / 60)}m ${duracionSegundos % 60}s`,
         esperaFormato: `${Math.floor(esperaSegundos / 60)}m ${esperaSegundos % 60}s`
       };
     }).sort((a, b) => {
+      const timeA = a.fechaFinalizacion || a.fechaLlamado || a.fechaCreacion;
+      const timeB = b.fechaFinalizacion || b.fechaLlamado || b.fechaCreacion;
+      return new Date(timeB).getTime() - new Date(timeA).getTime();
+    });
+  }
+
+  // --- Historial Consolidado para Supervisores (Todas las Cajas o Todas las Triadas o Consolidado General) ---
+  public getHistorialGeneralRange(
+    tipo: 'CAJA' | 'TRIADA' | 'TODAS' | 'AMBOS', 
+    rango: 'diario' | 'semanal' | 'mensual' | 'anual' = 'diario', 
+    sedeId?: string,
+    fechaInicio?: string,
+    fechaFin?: string
+  ) {
+    const filterSede = sedeId;
+    const items: any[] = [];
+
+    for (const t of this.data.tickets) {
+      if (filterSede && t.sedeId && t.sedeId !== filterSede) continue;
+
+      const tDate = t.fechaFinalizacion || t.fechaLlamado || t.fechaCreacion;
+      if (!this.isWithinDateRange(tDate, fechaInicio, fechaFin, rango)) continue;
+
+      if (tipo === 'CAJA') {
+        // REPORTE EXCLUSIVO DE CAJA (Ventanillas 0 a 8) - NO MEZCLAR CON TRIADA
+        const hasCaja = (t.cajasHistorialIds && t.cajasHistorialIds.some(id => id <= 100 || id % 1000 <= 100)) ||
+          t.etapa === 'CAJA' ||
+          (this.data.atenciones && this.data.atenciones.some(a => a.ticketId === t.id && (a.cajaId <= 100 || a.cajaId % 1000 <= 100))) ||
+          (this.data.eventos && this.data.eventos.some(e => (e as any).ticketId === t.id && (e.cajaId ? (e.cajaId <= 100 || e.cajaId % 1000 <= 100) : false))) ||
+          (t.etapa === 'TRIADA' && (t.preferencial || (t.codigo && !t.codigo.startsWith('TR'))));
+
+        if (!hasCaja) continue;
+
+        let cajaNum = 1;
+        if (t.cajasHistorialIds) {
+          const cajaHistId = t.cajasHistorialIds.find(id => id <= 100 || id % 1000 <= 100);
+          if (cajaHistId !== undefined) {
+            cajaNum = cajaHistId === 100 ? 0 : (cajaHistId % 1000);
+          }
+        } else {
+          const at = this.data.atenciones?.find(a => a.ticketId === t.id && (a.cajaId <= 100 || a.cajaId % 1000 <= 100));
+          if (at) {
+            cajaNum = at.cajaId === 100 ? 0 : (at.cajaId % 1000);
+          } else {
+            const ev = this.data.eventos?.find(e => (e as any).ticketId === t.id && e.cajaId && (e.cajaId <= 100 || e.cajaId % 1000 <= 100));
+            if (ev && ev.cajaId) {
+              cajaNum = ev.cajaId === 100 ? 0 : (ev.cajaId % 1000);
+            }
+          }
+        }
+        if (t.preferencial && (cajaNum === 1 || cajaNum === 0) && t.codigo?.startsWith('P-')) {
+          cajaNum = 0;
+        }
+
+        const atencionCaja = this.data.atenciones?.find(a => 
+          a.ticketId === t.id && (a.cajaId <= 100 || a.cajaId % 1000 <= 100)
+        );
+
+        let duracionSegundos = atencionCaja?.duracionSegundos || t.duracionAtencionSegundos || 0;
+        if (!duracionSegundos && t.fechaInicio && t.fechaFinalizacion) {
+          duracionSegundos = Math.max(0, Math.floor((new Date(t.fechaFinalizacion).getTime() - new Date(t.fechaInicio).getTime()) / 1000));
+        }
+
+        let esperaSegundos = t.duracionEsperaSegundos || 0;
+        if (!esperaSegundos && t.fechaCreacion && t.fechaLlamado) {
+          esperaSegundos = Math.max(0, Math.floor((new Date(t.fechaLlamado).getTime() - new Date(t.fechaCreacion).getTime()) / 1000));
+        }
+
+        const estacionTexto = cajaNum === 0 ? 'Caja 0 (Pref.)' : `Caja ${cajaNum}`;
+        const funcNombre = atencionCaja?.usuarioId 
+          ? (this.data.usuarios.find(u => u.id === atencionCaja.usuarioId)?.nombre || t.usuarioNombre || 'Funcionario de Caja')
+          : (t.usuarioNombre || 'Funcionario de Caja');
+
+        items.push({
+          ...t,
+          etapa: 'CAJA',
+          cajaNumero: cajaNum,
+          cajaId: cajaNum === 0 ? 100 : cajaNum,
+          estacionTexto,
+          usuarioNombre: funcNombre,
+          duracionSegundos,
+          esperaSegundos,
+          duracionFormato: `${Math.floor(duracionSegundos / 60)}m ${duracionSegundos % 60}s`,
+          esperaFormato: `${Math.floor(esperaSegundos / 60)}m ${esperaSegundos % 60}s`
+        });
+
+      } else if (tipo === 'TRIADA') {
+        // REPORTE EXCLUSIVO DE TRIADA (Módulos 1 a 8) - NO MEZCLAR CON CAJA
+        const hasTriada = t.etapa === 'TRIADA' || 
+          (t.cajasHistorialIds && t.cajasHistorialIds.some(id => (id >= 200 && id <= 208) || id % 1000 >= 200)) ||
+          (t.cajaId && (t.cajaId >= 200 || t.cajaId % 1000 >= 200)) ||
+          (this.data.atenciones && this.data.atenciones.some(a => a.ticketId === t.id && (a.cajaId >= 200 || a.cajaId % 1000 >= 200))) ||
+          (this.data.eventos && this.data.eventos.some(e => (e as any).ticketId === t.id && (e.cajaId ? (e.cajaId >= 200 || e.cajaId % 1000 >= 200) : false)));
+
+        if (!hasTriada) continue;
+
+        let triadaNum = t.cajaNumero !== undefined ? t.cajaNumero : 1;
+        if (t.cajasHistorialIds) {
+          const triadaHistId = t.cajasHistorialIds.find(id => (id >= 200 && id <= 208) || id % 1000 >= 200);
+          if (triadaHistId !== undefined) {
+            triadaNum = (triadaHistId % 1000) - 200;
+            if (triadaNum < 1 || triadaNum > 8) triadaNum = t.cajaNumero || 1;
+          }
+        }
+
+        const atencionTriada = this.data.atenciones?.find(a => 
+          a.ticketId === t.id && (a.cajaId >= 200 || a.cajaId % 1000 >= 200)
+        );
+
+        let duracionSegundos = atencionTriada?.duracionSegundos || t.duracionAtencionSegundos || 0;
+        if (!duracionSegundos && t.fechaInicio && t.fechaFinalizacion) {
+          duracionSegundos = Math.max(0, Math.floor((new Date(t.fechaFinalizacion).getTime() - new Date(t.fechaInicio).getTime()) / 1000));
+        }
+
+        let esperaSegundos = t.duracionEsperaSegundos || 0;
+        if (!esperaSegundos && t.fechaCreacion && t.fechaLlamado) {
+          esperaSegundos = Math.max(0, Math.floor((new Date(t.fechaLlamado).getTime() - new Date(t.fechaCreacion).getTime()) / 1000));
+        }
+
+        const estacionTexto = `Triada ${triadaNum}`;
+        const funcNombre = atencionTriada?.usuarioId
+          ? (this.data.usuarios.find(u => u.id === atencionTriada.usuarioId)?.nombre || t.usuarioNombre || 'Operador de Triada')
+          : (t.usuarioNombre || 'Operador de Triada');
+
+        items.push({
+          ...t,
+          etapa: 'TRIADA',
+          cajaNumero: triadaNum,
+          cajaId: 200 + triadaNum,
+          estacionTexto,
+          usuarioNombre: funcNombre,
+          duracionSegundos,
+          esperaSegundos,
+          duracionFormato: `${Math.floor(duracionSegundos / 60)}m ${duracionSegundos % 60}s`,
+          esperaFormato: `${Math.floor(esperaSegundos / 60)}m ${esperaSegundos % 60}s`
+        });
+
+      } else {
+        // CONSOLIDADO GENERAL (TODAS) - EXCLUSIVO PARA SUPER ADMIN
+        // "en el consolidado debe aparecer los turnos finalizados tanto de caja como de triada"
+        const hasCaja = (t.cajasHistorialIds && t.cajasHistorialIds.some(id => id <= 100 || id % 1000 <= 100)) ||
+          t.etapa === 'CAJA' ||
+          (this.data.atenciones && this.data.atenciones.some(a => a.ticketId === t.id && (a.cajaId <= 100 || a.cajaId % 1000 <= 100))) ||
+          (this.data.eventos && this.data.eventos.some(e => (e as any).ticketId === t.id && (e.cajaId ? (e.cajaId <= 100 || e.cajaId % 1000 <= 100) : false))) ||
+          (t.etapa === 'TRIADA' && (t.preferencial || (t.codigo && !t.codigo.startsWith('TR'))));
+        
+        const hasTriada = t.etapa === 'TRIADA' || 
+          (t.cajasHistorialIds && t.cajasHistorialIds.some(id => (id >= 200 && id <= 208) || id % 1000 >= 200)) ||
+          (t.cajaId && (t.cajaId >= 200 || t.cajaId % 1000 >= 200)) ||
+          (this.data.atenciones && this.data.atenciones.some(a => a.ticketId === t.id && (a.cajaId >= 200 || a.cajaId % 1000 >= 200))) ||
+          (this.data.eventos && this.data.eventos.some(e => (e as any).ticketId === t.id && (e.cajaId ? (e.cajaId >= 200 || e.cajaId % 1000 >= 200) : false)));
+
+        // Registro de atención en Caja
+        if (hasCaja) {
+          let cajaNum = 1;
+          if (t.cajasHistorialIds) {
+            const cId = t.cajasHistorialIds.find(id => id <= 100 || id % 1000 <= 100);
+            if (cId !== undefined) cajaNum = cId === 100 ? 0 : (cId % 1000);
+          } else {
+            const at = this.data.atenciones?.find(a => a.ticketId === t.id && (a.cajaId <= 100 || a.cajaId % 1000 <= 100));
+            if (at) {
+              cajaNum = at.cajaId === 100 ? 0 : (at.cajaId % 1000);
+            } else {
+              const ev = this.data.eventos?.find(e => (e as any).ticketId === t.id && e.cajaId && (e.cajaId <= 100 || e.cajaId % 1000 <= 100));
+              if (ev && ev.cajaId) {
+                cajaNum = ev.cajaId === 100 ? 0 : (ev.cajaId % 1000);
+              }
+            }
+          }
+          if (t.preferencial && (cajaNum === 1 || cajaNum === 0) && t.codigo?.startsWith('P-')) {
+            cajaNum = 0;
+          }
+
+          const atencionCaja = this.data.atenciones?.find(a => 
+            a.ticketId === t.id && (a.cajaId <= 100 || a.cajaId % 1000 <= 100)
+          );
+
+          let duracionSegundos = atencionCaja?.duracionSegundos || t.duracionAtencionSegundos || 60;
+          let esperaSegundos = t.duracionEsperaSegundos || 120;
+
+          items.push({
+            ...t,
+            id: `${t.id}-caja`,
+            etapa: 'CAJA',
+            cajaNumero: cajaNum,
+            cajaId: cajaNum === 0 ? 100 : cajaNum,
+            estacionTexto: cajaNum === 0 ? 'Caja 0 (Pref.)' : `Caja ${cajaNum}`,
+            usuarioNombre: atencionCaja?.usuarioId 
+              ? (this.data.usuarios.find(u => u.id === atencionCaja.usuarioId)?.nombre || t.usuarioNombre || 'Funcionario Caja')
+              : (t.usuarioNombre || 'Funcionario Caja'),
+            duracionSegundos,
+            esperaSegundos,
+            duracionFormato: `${Math.floor(duracionSegundos / 60)}m ${duracionSegundos % 60}s`,
+            esperaFormato: `${Math.floor(esperaSegundos / 60)}m ${esperaSegundos % 60}s`
+          });
+        }
+
+        // Registro de atención en Triada
+        if (hasTriada) {
+          let triadaNum = t.cajaNumero !== undefined ? t.cajaNumero : 1;
+          if (t.cajasHistorialIds) {
+            const trId = t.cajasHistorialIds.find(id => (id >= 200 && id <= 208) || id % 1000 >= 200);
+            if (trId !== undefined) {
+              triadaNum = (trId % 1000) - 200;
+              if (triadaNum < 1 || triadaNum > 8) triadaNum = t.cajaNumero || 1;
+            }
+          }
+
+          const atencionTriada = this.data.atenciones?.find(a => 
+            a.ticketId === t.id && (a.cajaId >= 200 || a.cajaId % 1000 >= 200)
+          );
+
+          let duracionSegundos = atencionTriada?.duracionSegundos || t.duracionAtencionSegundos || 60;
+          let esperaSegundos = t.duracionEsperaSegundos || 60;
+
+          items.push({
+            ...t,
+            id: `${t.id}-triada`,
+            etapa: 'TRIADA',
+            cajaNumero: triadaNum,
+            cajaId: 200 + triadaNum,
+            estacionTexto: `Triada ${triadaNum}`,
+            usuarioNombre: atencionTriada?.usuarioId
+              ? (this.data.usuarios.find(u => u.id === atencionTriada.usuarioId)?.nombre || t.usuarioNombre || 'Operador Triada')
+              : (t.usuarioNombre || 'Operador Triada'),
+            duracionSegundos,
+            esperaSegundos,
+            duracionFormato: `${Math.floor(duracionSegundos / 60)}m ${duracionSegundos % 60}s`,
+            esperaFormato: `${Math.floor(esperaSegundos / 60)}m ${esperaSegundos % 60}s`
+          });
+        }
+
+        if (!hasCaja && !hasTriada) {
+          items.push({
+            ...t,
+            estacionTexto: t.cajaNumero !== undefined ? `Caja ${t.cajaNumero}` : 'Atención',
+            duracionSegundos: t.duracionAtencionSegundos || 0,
+            esperaSegundos: t.duracionEsperaSegundos || 0,
+            duracionFormato: '0m 0s',
+            esperaFormato: '0m 0s'
+          });
+        }
+      }
+    }
+
+    return items.sort((a, b) => {
       const timeA = a.fechaFinalizacion || a.fechaLlamado || a.fechaCreacion;
       const timeB = b.fechaFinalizacion || b.fechaLlamado || b.fechaCreacion;
       return new Date(timeB).getTime() - new Date(timeA).getTime();
@@ -661,6 +1260,95 @@ class Database {
     this.scheduleSave();
     this.syncToSupabase('cajas', caja);
     return caja;
+  }
+
+  public reiniciarCaja(cajaId: number, ticketIdOpcional?: string): { caja: Caja; ticket: Ticket | null } | null {
+    const caja = this.data.cajas.find(c => c.id === cajaId);
+    if (!caja) return null;
+
+    const now = new Date().toISOString();
+
+    // 1. Buscar el ticket a restaurar
+    let ticket: Ticket | null = null;
+
+    if (ticketIdOpcional) {
+      ticket = this.data.tickets.find(t => t.id === ticketIdOpcional) || null;
+    }
+
+    // Si no se pasó ticket específico, buscar el ticket actual de la caja
+    if (!ticket && caja.ticketActualId) {
+      ticket = this.data.tickets.find(t => t.id === caja.ticketActualId) || null;
+    }
+
+    // Si aún no hay ticket, buscar cualquier ticket activo vinculado a esta caja
+    if (!ticket) {
+      ticket = this.data.tickets.find(t => 
+        t.cajaId === caja.id && 
+        (t.estado === 'ASIGNADO' || t.estado === 'LLAMANDO' || t.estado === 'EN_ATENCION')
+      ) || null;
+    }
+
+    // Si aún no hay, buscar el último ticket histórico o atascado asociado a esta caja
+    if (!ticket) {
+      const ticketsCaja = this.data.tickets
+        .filter(t => t.cajaId === caja.id && (t.sedeId === caja.sedeId || !t.sedeId))
+        .sort((a, b) => new Date(b.fechaAsignacion || b.fechaCreacion).getTime() - new Date(a.fechaAsignacion || a.fechaCreacion).getTime());
+      if (ticketsCaja.length > 0) {
+        ticket = ticketsCaja[0];
+      }
+    }
+
+    // Si aún no hay y hay turnos en espera para esta etapa, tomar el primer turno en espera
+    if (!ticket) {
+      const etapaBuscada = caja.tipo === 'TRIADA' ? 'TRIADA' : 'CAJA';
+      const enEspera = this.data.tickets
+        .filter(t => t.estado === 'ESPERANDO' && (t.etapa === etapaBuscada || (!t.etapa && etapaBuscada === 'CAJA')) && (t.sedeId === caja.sedeId || !t.sedeId))
+        .sort((a, b) => new Date(a.fechaCreacion).getTime() - new Date(b.fechaCreacion).getTime());
+      if (enEspera.length > 0) {
+        ticket = enEspera[0];
+      }
+    }
+
+    // 2. Si se encontró el ticket: restaurarlo al estado ASIGNADO en esta caja para poder avanzar
+    if (ticket) {
+      ticket.estado = 'ASIGNADO';
+      ticket.cajaId = caja.id;
+      ticket.cajaNumero = caja.numero;
+      ticket.usuarioId = caja.usuarioActualId || ticket.usuarioId || null;
+      ticket.usuarioNombre = caja.usuarioNombre || ticket.usuarioNombre || null;
+      ticket.etapa = caja.tipo === 'TRIADA' ? 'TRIADA' : 'CAJA';
+      ticket.fechaAsignacion = now;
+      ticket.fechaLlamado = null;
+      ticket.fechaInicio = null;
+      ticket.fechaFinalizacion = null;
+      ticket.duracionAtencionSegundos = undefined;
+      ticket.llamadosContador = 0;
+
+      caja.activa = true;
+      caja.estado = 'OCUPADA';
+      caja.ticketActualId = ticket.id;
+      caja.ticketActualCodigo = ticket.codigo;
+      caja.ultimaActividad = now;
+
+      this.scheduleSave();
+      this.syncToSupabase('tickets', ticket);
+      this.syncToSupabase('cajas', caja);
+
+      return { caja, ticket };
+    } else {
+      // Si no había ningún ticket para restaurar, reiniciar la caja limpia
+      const estadoCaja = (caja.activa && caja.usuarioActualId) ? 'DISPONIBLE' : 'DESCONECTADA';
+      caja.activa = true;
+      caja.estado = estadoCaja;
+      caja.ticketActualId = null;
+      caja.ticketActualCodigo = null;
+      caja.ultimaActividad = now;
+
+      this.scheduleSave();
+      this.syncToSupabase('cajas', caja);
+
+      return { caja, ticket: null };
+    }
   }
 
   // --- Tickets ---
@@ -750,6 +1438,10 @@ class Database {
     this.data.atenciones.push(item);
     this.scheduleSave();
     return item;
+  }
+
+  public getAtenciones(): Atencion[] {
+    return this.data.atenciones || [];
   }
 
   // --- Eventos / Auditoría ---

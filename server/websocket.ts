@@ -23,7 +23,12 @@ export class WebSocketManager {
   private heartbeatInterval: NodeJS.Timeout | null = null;
 
   public init(server: Server) {
-    this.wss = new WebSocketServer({ server, path: '/ws' });
+    // Configurar WebSocket Server con límite de carga máxima para mitigar ataques DoS
+    this.wss = new WebSocketServer({
+      server,
+      path: '/ws',
+      maxPayload: 64 * 1024 // 64 KB máximo por mensaje
+    });
 
     this.wss.on('connection', (ws: WebSocket) => {
       const clientId = `conn-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
@@ -183,9 +188,9 @@ export class WebSocketManager {
     this.clients.delete(clientId);
 
     // Si era un funcionario en una caja, actualizar estado a DESCONECTADA
-    if (client.cajaId && client.role === 'FUNCIONARIO') {
+    if (client.cajaId && (client.role === 'FUNCIONARIO' || client.usuarioId)) {
       const caja = db.getCajaById(client.cajaId);
-      if (caja && caja.socketId === clientId) {
+      if (caja && (caja.socketId === clientId || caja.usuarioActualId === client.usuarioId || !caja.socketId)) {
         // Si tenía un ticket asignado pero aún no en atención, revertirlo a ESPERANDO para que otra caja lo atienda
         if (caja.ticketActualId) {
           const ticket = db.getTicketById(caja.ticketActualId);
@@ -216,14 +221,15 @@ export class WebSocketManager {
           caja: caja.numero,
           cajaId: caja.id,
           funcionario: client.usuarioNombre || undefined,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          sedeId: caja.sedeId
         };
 
         db.recordEvento(eventoDesconexion);
         this.broadcast(eventoDesconexion);
 
         // Despachar tickets que hayan quedado pendientes si hay otras cajas conectadas
-        dispatcher.triggerDispatch();
+        dispatcher.triggerDispatch(caja.sedeId);
       }
     }
   }

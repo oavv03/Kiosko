@@ -17,6 +17,7 @@ import {
 import { Ticket } from '../types';
 import { useCustomization } from '../context/CustomizationContext';
 import { LogoInstitucional } from './LogoInstitucional';
+import { imprimirTicket } from '../utils/ticketPrinter';
 
 interface KioskViewProps {
   ticketsEsperandoCount: number;
@@ -137,175 +138,14 @@ export const KioskView: React.FC<KioskViewProps> = ({
     }
   };
 
-  const handleImprimir = () => {
+  const handleImprimir = async () => {
     if (!ticketEmitido) return;
     setImprimiendo(true);
-
     try {
-      const iframe = document.createElement('iframe');
-      iframe.style.position = 'fixed';
-      iframe.style.right = '0';
-      iframe.style.bottom = '0';
-      iframe.style.width = '0';
-      iframe.style.height = '0';
-      iframe.style.border = 'none';
-      document.body.appendChild(iframe);
-
-      const doc = iframe.contentWindow?.document;
-      if (doc) {
-        doc.open();
-        doc.write(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8" />
-            <title>Ticket ${ticketEmitido.codigo}</title>
-            <style>
-              @page {
-                size: 80mm auto;
-                margin: 0;
-              }
-              body {
-                font-family: 'Courier New', Courier, monospace, sans-serif;
-                width: 76mm;
-                margin: 0 auto;
-                padding: 10px 4px;
-                text-align: center;
-                color: #000;
-                background: #fff;
-              }
-              .header {
-                font-size: 15px;
-                font-weight: 900;
-                text-transform: uppercase;
-                margin-bottom: 2px;
-                letter-spacing: 0.5px;
-              }
-              .subheader {
-                font-size: 10px;
-                margin-bottom: 6px;
-                color: #444;
-              }
-              .divider {
-                border-top: 1px dashed #000;
-                margin: 6px 0;
-              }
-              .label {
-                font-size: 9px;
-                text-transform: uppercase;
-                letter-spacing: 1px;
-                color: #555;
-              }
-              .citizen {
-                font-size: 13px;
-                font-weight: bold;
-                margin: 2px 0 6px 0;
-                text-transform: capitalize;
-              }
-              .ticket-number {
-                font-size: 46px;
-                font-weight: 900;
-                line-height: 1;
-                margin: 8px 0;
-                letter-spacing: -1px;
-              }
-              .tramite-pill {
-                display: inline-block;
-                border: 1px solid #000;
-                border-radius: 4px;
-                padding: 3px 8px;
-                font-size: 11px;
-                font-weight: bold;
-                text-transform: uppercase;
-                margin-bottom: 6px;
-              }
-              .details {
-                font-size: 10px;
-                text-align: left;
-                margin-top: 6px;
-              }
-              .details-row {
-                display: flex;
-                justify-content: space-between;
-                margin-bottom: 3px;
-              }
-              .footer-msg {
-                font-size: 9.5px;
-                color: #222;
-                margin-top: 8px;
-                line-height: 1.3;
-              }
-              .barcode {
-                font-family: 'Courier New', monospace;
-                font-size: 14px;
-                letter-spacing: 3px;
-                font-weight: bold;
-                margin-top: 8px;
-              }
-            </style>
-          </head>
-          <body>
-            <div class="header">${configuracion.nombreInstitucion || 'Institución Pública'}</div>
-            <div class="subheader">${configuracion.nombreSistema || 'Sistema de Gestión de Turnos'} • Comprobante Oficial</div>
-            <div class="divider"></div>
-            
-            <div class="label">Ciudadano(a)</div>
-            <div class="citizen">${[ticketEmitido.ciudadanoNombre, ticketEmitido.ciudadanoApellido].filter(Boolean).join(' ') || ticketEmitido.ciudadanoNombre || 'Ciudadano'}</div>
-            
-            <div class="label">Número de Turno</div>
-            <div class="ticket-number">${ticketEmitido.codigo}</div>
-            <div class="tramite-pill">${ticketEmitido.tramite}</div>
-            ${ticketEmitido.preferencial ? '<div style="background:#000; color:#fff; font-size:11px; font-weight:bold; padding:3px 6px; border-radius:3px; margin:4px 0;">★ TURNO PREFERENCIAL ♿ • CAJA 0</div>' : ''}
-            
-            <div class="divider"></div>
-            <div class="details">
-              <div class="details-row">
-                <span>Fecha:</span>
-                <span>${new Date(ticketEmitido.fechaCreacion).toLocaleDateString()}</span>
-              </div>
-              <div class="details-row">
-                <span>Hora:</span>
-                <span>${new Date(ticketEmitido.fechaCreacion).toLocaleTimeString()}</span>
-              </div>
-              <div class="details-row">
-                <span>Estado:</span>
-                <span>En espera de atención</span>
-              </div>
-            </div>
-            
-            <div class="divider"></div>
-            <div class="footer-msg">
-              Por favor permanezca atento a la <strong>Pantalla TV</strong> y al audio del llamado.
-            </div>
-            <div class="barcode">*${ticketEmitido.codigo}*</div>
-          </body>
-          </html>
-        `);
-        doc.close();
-
-        setTimeout(() => {
-          try {
-            iframe.contentWindow?.focus();
-            iframe.contentWindow?.print();
-          } catch (errPrint) {
-            console.warn('Fallback to standard window.print()', errPrint);
-            window.print();
-          } finally {
-            setTimeout(() => {
-              try {
-                document.body.removeChild(iframe);
-              } catch (e) {}
-              setImprimiendo(false);
-            }, 1200);
-          }
-        }, 300);
-      } else {
-        window.print();
-        setImprimiendo(false);
-      }
-    } catch (e) {
-      console.warn('Error with print iframe, using standard print', e);
-      window.print();
+      await imprimirTicket(ticketEmitido, configuracion);
+    } catch (err) {
+      console.warn('Error al imprimir ticket:', err);
+    } finally {
       setImprimiendo(false);
     }
   };
@@ -683,26 +523,37 @@ export const KioskView: React.FC<KioskViewProps> = ({
             >
               {/* Encabezado del Ticket */}
               <div className="text-center pb-4 border-b border-dashed border-slate-300">
+                {configuracion.ticketMostrarLogo !== false && (configuracion.ticketLogoUrl || configuracion.logoPrincipalUrl) && (
+                  <div className="mb-3 flex justify-center items-center">
+                    <img 
+                      src={configuracion.ticketLogoUrl || configuracion.logoPrincipalUrl} 
+                      alt="Logo del Ticket" 
+                      className="object-contain max-h-16 max-w-[200px]"
+                    />
+                  </div>
+                )}
                 <span 
                   className="text-xs uppercase tracking-wider font-extrabold block"
                   style={{ color: configuracion.primaryColor || '#1D4ED8' }}
                 >
-                  {configuracion.nombreInstitucion || 'Tribunal Electoral'}
+                  {configuracion.ticketEncabezado || configuracion.nombreInstitucion || 'Tribunal Electoral'}
                 </span>
                 <p className="text-[11px] text-slate-500 mt-0.5">
-                  {configuracion.nombreSistema || 'Sistema de Gestión de Turnos'} • Comprobante Oficial
+                  {configuracion.ticketSubencabezado || (configuracion.nombreSistema ? `${configuracion.nombreSistema} • Comprobante Oficial` : 'Comprobante Oficial de Turno')}
                 </p>
               </div>
 
               {/* Datos del Ciudadano */}
-              <div className="mt-4 text-center">
-                <p className="text-[11px] uppercase font-bold text-slate-500 tracking-wider">
-                  Ciudadano(a)
-                </p>
-                <h4 className="text-lg font-black text-slate-900 capitalize">
-                  {[ticketEmitido.ciudadanoNombre, ticketEmitido.ciudadanoApellido].filter(Boolean).join(' ') || ticketEmitido.ciudadanoNombre || 'Ciudadano'}
-                </h4>
-              </div>
+              {configuracion.ticketMostrarCiudadano !== false && (
+                <div className="mt-4 text-center">
+                  <p className="text-[11px] uppercase font-bold text-slate-500 tracking-wider">
+                    Ciudadano(a)
+                  </p>
+                  <h4 className="text-lg font-black text-slate-900 capitalize">
+                    {[ticketEmitido.ciudadanoNombre, ticketEmitido.ciudadanoApellido].filter(Boolean).join(' ') || ticketEmitido.ciudadanoNombre || 'Ciudadano'}
+                  </h4>
+                </div>
+              )}
 
               {/* Código de Turno */}
               <div className="py-4 text-center">
@@ -716,9 +567,11 @@ export const KioskView: React.FC<KioskViewProps> = ({
                   {ticketEmitido.codigo}
                 </div>
                 <div className="flex items-center justify-center gap-2 flex-wrap">
-                  <span className="inline-block px-3 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-900 border border-slate-200">
-                    {ticketEmitido.tramite}
-                  </span>
+                  {configuracion.ticketMostrarTramite !== false && (
+                    <span className="inline-block px-3 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-900 border border-slate-200">
+                      {ticketEmitido.tramite}
+                    </span>
+                  )}
                   {ticketEmitido.preferencial && (
                     <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-black bg-amber-100 text-amber-900 border border-amber-300">
                       <span>♿</span> Preferencial • Caja 0
@@ -728,46 +581,64 @@ export const KioskView: React.FC<KioskViewProps> = ({
               </div>
 
               {/* Detalles y aviso */}
-              <div className="space-y-2 pt-3 border-t border-dashed border-slate-300 text-xs text-slate-600">
-                <div className="flex justify-between">
-                  <span>Fecha y hora:</span>
-                  <span className="font-semibold text-slate-800">
-                    {new Date(ticketEmitido.fechaCreacion).toLocaleTimeString()}
-                  </span>
+              {configuracion.ticketMostrarFechaHora !== false && (
+                <div className="space-y-2 pt-3 border-t border-dashed border-slate-300 text-xs text-slate-600">
+                  <div className="flex justify-between">
+                    <span>Fecha y hora:</span>
+                    <span className="font-semibold text-slate-800">
+                      {new Date(ticketEmitido.fechaCreacion).toLocaleDateString()} {new Date(ticketEmitido.fechaCreacion).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Estado del turno:</span>
+                    <span className="font-bold text-emerald-600">
+                      {ticketEmitido.estado === 'ASIGNADO' ? `Asignado a Caja ${ticketEmitido.cajaNumero}` : 'En espera de llamado'}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex justify-between">
-                  <span>Estado del turno:</span>
-                  <span className="font-bold text-emerald-600">
-                    {ticketEmitido.estado === 'ASIGNADO' ? `Asignado a Caja ${ticketEmitido.cajaNumero}` : 'En espera de llamado'}
-                  </span>
-                </div>
-              </div>
+              )}
 
               {/* Mensaje de llamado */}
-              <div className="mt-4 p-3 rounded-2xl bg-slate-100 text-center">
-                <p className="text-xs font-medium text-slate-700">
-                  Por favor permanezca atento a la <strong>Pantalla Pública</strong> y al sonido del llamado por voz.
-                </p>
-              </div>
+              {configuracion.ticketMensajeEspera && (
+                <div className="mt-4 p-3 rounded-2xl bg-slate-100 text-center">
+                  <p className="text-xs font-medium text-slate-700">
+                    {configuracion.ticketMensajeEspera}
+                  </p>
+                </div>
+              )}
 
               {/* Simulación visual de código de barras */}
-              <div className="mt-4 pt-3 border-t border-dashed border-slate-300 text-center">
-                <div className="flex justify-center items-center gap-1 h-7 opacity-80">
-                  <span className="w-1 h-full bg-slate-900 inline-block" />
-                  <span className="w-0.5 h-full bg-slate-900 inline-block" />
-                  <span className="w-2 h-full bg-slate-900 inline-block" />
-                  <span className="w-1 h-full bg-slate-900 inline-block" />
-                  <span className="w-3 h-full bg-slate-900 inline-block" />
-                  <span className="w-0.5 h-full bg-slate-900 inline-block" />
-                  <span className="w-1.5 h-full bg-slate-900 inline-block" />
-                  <span className="w-0.5 h-full bg-slate-900 inline-block" />
-                  <span className="w-2.5 h-full bg-slate-900 inline-block" />
-                  <span className="w-1 h-full bg-slate-900 inline-block" />
-                  <span className="w-0.5 h-full bg-slate-900 inline-block" />
-                  <span className="w-2 h-full bg-slate-900 inline-block" />
+              {configuracion.ticketMostrarCodigoBarras !== false && (
+                <div className="mt-4 pt-3 border-t border-dashed border-slate-300 text-center">
+                  <div className="flex justify-center items-center gap-1 h-7 opacity-80">
+                    <span className="w-1 h-full bg-slate-900 inline-block" />
+                    <span className="w-0.5 h-full bg-slate-900 inline-block" />
+                    <span className="w-2 h-full bg-slate-900 inline-block" />
+                    <span className="w-1 h-full bg-slate-900 inline-block" />
+                    <span className="w-3 h-full bg-slate-900 inline-block" />
+                    <span className="w-0.5 h-full bg-slate-900 inline-block" />
+                    <span className="w-1.5 h-full bg-slate-900 inline-block" />
+                    <span className="w-0.5 h-full bg-slate-900 inline-block" />
+                    <span className="w-2.5 h-full bg-slate-900 inline-block" />
+                    <span className="w-1 h-full bg-slate-900 inline-block" />
+                    <span className="w-0.5 h-full bg-slate-900 inline-block" />
+                    <span className="w-2 h-full bg-slate-900 inline-block" />
+                  </div>
+                  <p className="text-[10px] font-mono text-slate-500 mt-1">*{ticketEmitido.codigo}*</p>
                 </div>
-                <p className="text-[10px] font-mono text-slate-500 mt-1">*{ticketEmitido.codigo}*</p>
-              </div>
+              )}
+
+              {/* Mensajes de pie y validez */}
+              {(configuracion.ticketPieMensaje || configuracion.ticketNotaPie) && (
+                <div className="mt-3 pt-2 text-center text-slate-500 space-y-1">
+                  {configuracion.ticketPieMensaje && (
+                    <p className="text-xs font-semibold text-slate-700">{configuracion.ticketPieMensaje}</p>
+                  )}
+                  {configuracion.ticketNotaPie && (
+                    <p className="text-[10px] text-slate-400 italic">{configuracion.ticketNotaPie}</p>
+                  )}
+                </div>
+              )}
 
               {/* Botonera de acciones (No se imprime) */}
               <div className="mt-5 space-y-2 no-print">

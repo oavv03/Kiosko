@@ -140,6 +140,13 @@ class Dispatcher {
   private asignarTicketACaja(ticket: Ticket, caja: Caja): void {
     const now = new Date().toISOString();
 
+    const historial = Array.isArray(ticket.cajasHistorialIds) 
+      ? [...ticket.cajasHistorialIds] 
+      : (ticket.cajaId ? [ticket.cajaId] : []);
+    if (!historial.includes(caja.id)) {
+      historial.push(caja.id);
+    }
+
     // Actualización atómica en base de datos
     db.updateTicket(ticket.id, {
       estado: 'ASIGNADO',
@@ -147,7 +154,8 @@ class Dispatcher {
       cajaNumero: caja.numero,
       usuarioId: caja.usuarioActualId,
       usuarioNombre: caja.usuarioNombre,
-      fechaAsignacion: now
+      fechaAsignacion: now,
+      cajasHistorialIds: historial
     });
 
     db.updateCaja(caja.id, {

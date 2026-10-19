@@ -173,19 +173,25 @@ export const PantallaPublica: React.FC<PantallaPublicaProps> = ({
       || null;
   })();
 
-  // El ticket principal mostrado en pantalla:
-  // SOLO se muestra si está en LLAMANDO. Al dar "Iniciar atención", el ticket se va de la pantalla de inmediato.
-  const ticketMostrado: Ticket | null = ticketLlamandoSala;
+  // El ticket principal mostrado en pantalla (vista normal / en pequeño de la sala):
+  // SOLO se muestra si está activamente en estado LLAMANDO.
+  // Cuando se inicie atención (pasa a EN_ATENCION), el ticket DEBE IRSE de la pantalla de inmediato.
+  const ticketMostrado: Ticket | null = (ticketLlamandoSala && ticketLlamandoSala.estado === 'LLAMANDO')
+    ? ticketLlamandoSala
+    : null;
 
   // Determinar si el ticket mostrado está en pleno llamado activo o destacándose
   const esLlamandoActivo = ticketMostrado?.estado === 'LLAMANDO' || destacarNuevo;
 
-  // Activar vista temporal donde SOLO se ve el llamado en grande cuando hay un llamado activo
+  // Activar llamado en pantalla grande (7 segundos de duración por requerimiento en caja y triada)
   useEffect(() => {
     if (ticketLlamandoSala && ticketLlamandoSala.estado === 'LLAMANDO') {
       setLlamadoSoloGrande(ticketLlamandoSala);
-      setTiempoRestanteGrande(10); // 10 segundos en pantalla completa sólo el llamado
+      setTiempoRestanteGrande(7); // Cada llamado en grande debe durar exactamente 7 segundos
       setDestacarNuevo(true);
+    } else {
+      setLlamadoSoloGrande(null);
+      setTiempoRestanteGrande(0);
     }
   }, [
     ticketLlamandoSala?.id,
@@ -196,14 +202,10 @@ export const PantallaPublica: React.FC<PantallaPublicaProps> = ({
     ticketLlamandoSala?.estado
   ]);
 
-  // Temporizador para el llamado exclusivo en grande (10s a 0s)
+  // Temporizador de 7 segundos para el llamado en grande en caja y en triada
+  // Al transcurrir los 7 segundos, se quita la vista grande y el turno pasa a verse en pequeño en la sala
   useEffect(() => {
-    if (!llamadoSoloGrande || tiempoRestanteGrande <= 0) {
-      if (llamadoSoloGrande && tiempoRestanteGrande <= 0) {
-        setLlamadoSoloGrande(null);
-      }
-      return;
-    }
+    if (!llamadoSoloGrande) return;
 
     const timer = setInterval(() => {
       setTiempoRestanteGrande((prev) => {
@@ -216,26 +218,31 @@ export const PantallaPublica: React.FC<PantallaPublicaProps> = ({
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [llamadoSoloGrande, tiempoRestanteGrande]);
+  }, [
+    llamadoSoloGrande?.id,
+    llamadoSoloGrande?.codigo,
+    llamadoSoloGrande?.fechaLlamado,
+    llamadoSoloGrande?.llamadosContador
+  ]);
 
   // Si el ticket que estaba en pantalla grande pasa a ser atendido (EN_ATENCION) o cambia de estado,
-  // se cierra la vista grande INMEDIATAMENTE sin retrasos para que se vaya de la pantalla.
+  // se cierra la vista grande de inmediato para dar paso a la atención
   useEffect(() => {
     if (llamadoSoloGrande) {
       const todos = [...ticketsActivos, ...ultimosLlamados];
       const match = todos.find(t => t.id === llamadoSoloGrande.id || t.codigo === llamadoSoloGrande.codigo);
-      if (match && match.estado !== 'LLAMANDO') {
+      if ((match && match.estado !== 'LLAMANDO') || (!ticketLlamandoSala && !match)) {
         setLlamadoSoloGrande(null);
         setTiempoRestanteGrande(0);
       }
     }
-  }, [ticketsActivos, ultimosLlamados, llamadoSoloGrande]);
+  }, [ticketsActivos, ultimosLlamados, llamadoSoloGrande, ticketLlamandoSala]);
 
   // Animación de parpadeo y resalte cuando cambia o se re-llama el turno mostrado
   useEffect(() => {
     if (ticketMostrado) {
       setDestacarNuevo(true);
-      const duracion = ticketMostrado.estado === 'LLAMANDO' ? 8000 : 3500;
+      const duracion = ticketMostrado.estado === 'LLAMANDO' ? 7000 : 3500;
       const timeout = setTimeout(() => setDestacarNuevo(false), duracion);
       return () => clearTimeout(timeout);
     }
@@ -245,7 +252,7 @@ export const PantallaPublica: React.FC<PantallaPublicaProps> = ({
   const mostrarEnGrandeManual = (ticket: Ticket | null) => {
     if (ticket) {
       setLlamadoSoloGrande(ticket);
-      setTiempoRestanteGrande(10);
+      setTiempoRestanteGrande(7);
     }
   };
 
@@ -420,14 +427,14 @@ export const PantallaPublica: React.FC<PantallaPublicaProps> = ({
               <span className={`w-2 h-2 rounded-full ${esTriadaGrande ? 'bg-indigo-600' : 'bg-cyan-400'} animate-ping`} />
               Mostrando llamado en grande ({tiempoRestanteGrande}s restantes)
             </span>
-            <span>Luego quedará visible en la sala</span>
+            <span>Luego quedará visible en pequeño en la sala</span>
           </div>
           <div className={`w-full h-2 rounded-full overflow-hidden ${esTriadaGrande ? 'bg-slate-200' : 'bg-slate-800'}`}>
             <div 
               className={`h-full transition-all duration-1000 ease-linear rounded-full ${
                 esTriadaGrande ? 'bg-gradient-to-r from-indigo-600 to-purple-600' : 'bg-gradient-to-r from-cyan-400 to-blue-500'
               }`}
-              style={{ width: `${(tiempoRestanteGrande / 10) * 100}%` }}
+              style={{ width: `${(tiempoRestanteGrande / 7) * 100}%` }}
             />
           </div>
         </div>

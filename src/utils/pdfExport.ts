@@ -3,11 +3,17 @@ import autoTable from 'jspdf-autotable';
 import { Ticket, Usuario, Caja } from '../types';
 
 export interface HistorialPdfParams {
-  caja: Caja;
+  caja?: Caja;
   usuario: Usuario | null;
   tickets: any[];
   tipoEstacion?: 'CAJA' | 'TRIADA';
   rango?: 'diario' | 'semanal' | 'mensual' | 'anual';
+  fechaInicio?: string;
+  fechaFin?: string;
+  nombreEstacionPersonalizado?: string;
+  sedeNombre?: string;
+  supervisorNombre?: string;
+  supervisorRol?: string;
 }
 
 export function generarPdfHistorial({
@@ -15,7 +21,13 @@ export function generarPdfHistorial({
   usuario,
   tickets,
   tipoEstacion = 'CAJA',
-  rango = 'diario'
+  rango = 'diario',
+  fechaInicio,
+  fechaFin,
+  nombreEstacionPersonalizado,
+  sedeNombre,
+  supervisorNombre,
+  supervisorRol
 }: HistorialPdfParams): void {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -31,7 +43,15 @@ export function generarPdfHistorial({
   });
   const horaEmision = new Date().toLocaleTimeString('es-ES');
 
-  const tituloRango = rango === 'diario' ? 'Diario (Hoy)' : rango === 'semanal' ? 'Semanal (Últimos 7 días)' : rango === 'mensual' ? 'Mensual (Últimos 30 días)' : 'Anual (Último año)';
+  const tituloRango = (fechaInicio && fechaFin)
+    ? (fechaInicio === fechaFin ? `Jornada del ${fechaInicio}` : `Rango del ${fechaInicio} al ${fechaFin}`)
+    : (rango === 'diario' 
+      ? 'Reporte Diario (Jornada Hoy)' 
+      : rango === 'semanal' 
+      ? 'Reporte Semanal (Últimos 7 días)' 
+      : rango === 'mensual' 
+      ? 'Reporte Mensual (Últimos 30 días)' 
+      : 'Reporte Anual (Último año)');
 
   const finalizados = tickets.filter(t => t.estado === 'FINALIZADO');
   const noPresentados = tickets.filter(t => t.estado === 'NO_PRESENTO');
@@ -40,12 +60,21 @@ export function generarPdfHistorial({
   const promMin = Math.floor(promedioSegundos / 60);
   const promSeg = promedioSegundos % 60;
 
-  const esTriada = tipoEstacion === 'TRIADA' || caja.tipo === 'TRIADA';
-  const nombreEstacion = esTriada
-    ? `Triada / Fotografía ${caja.numero}`
-    : (caja.numero === 0 ? 'Caja 0 (Preferencial)' : `Caja ${caja.numero}`);
+  const esTriada = tipoEstacion === 'TRIADA' || (caja && caja.tipo === 'TRIADA');
+  const nombreEstacion = nombreEstacionPersonalizado || (
+    caja 
+      ? (esTriada ? `Triada / Fotografía ${caja.numero}` : (caja.numero === 0 ? 'Caja 0 (Preferencial)' : `Caja ${caja.numero}`))
+      : (esTriada ? 'Todas las Triadas (Consolidado)' : 'Todas las Cajas (Consolidado)')
+  );
 
-  const nombreFuncionario = usuario?.nombre || caja.usuarioNombre || 'Funcionario en Turno';
+  const nombreResponsable = supervisorNombre || usuario?.nombre || (caja ? caja.usuarioNombre : 'Supervisor en Turno');
+  const rolResponsable = supervisorRol || (
+    usuario?.rol === 'SUPERVISOR_CAJA' 
+      ? 'Supervisor de Caja' 
+      : usuario?.rol === 'SUPERVISOR_TRIADA' 
+      ? 'Supervisor de Triada' 
+      : (usuario?.rol || 'Supervisor')
+  );
 
   // 1. Franja Superior Institucional
   if (esTriada) {
@@ -57,36 +86,36 @@ export function generarPdfHistorial({
 
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.text('SISTEMA INSTITUCIONAL DE GESTIÓN DE COLAS Y TURNOS', 14, 11);
+  doc.setFontSize(13);
+  doc.text('TRIBUNAL ELECTORAL DE PANAMÁ — SISTEMA DE TURNOS', 14, 11);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.text(`REPORTE OFICIAL DE TICKETS ATENDIDOS • PERÍODO: ${tituloRango.toUpperCase()}`, 14, 18);
+  doc.setFontSize(8.5);
+  doc.text(`REPORTE DE SUPERVISIÓN Y CONTROL • PERÍODO: ${tituloRango.toUpperCase()}`, 14, 18);
 
-  // 2. Título del Reporte y Datos de la Cajera / Estación
+  // 2. Título del Reporte y Datos de la Supervisión / Estación
   doc.setTextColor(30, 41, 59); // Slate 800
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(15);
-  doc.text(`Reporte de Atención: ${nombreEstacion}`, 14, 34);
+  doc.setFontSize(14);
+  doc.text(`Informe Oficial: ${nombreEstacion}`, 14, 33);
 
-  // Cuadro de Información de la Cajera
+  // Cuadro de Información del Supervisor y Estación
   doc.setFillColor(248, 250, 252); // Slate 50
   doc.setDrawColor(226, 232, 240); // Slate 200
-  doc.roundedRect(14, 38, 182, 26, 3, 3, 'FD');
+  doc.roundedRect(14, 37, 182, 27, 3, 3, 'FD');
 
-  doc.setFontSize(9);
+  doc.setFontSize(8.5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(71, 85, 105); // Slate 600
-  doc.text('Cajera / Funcionario:', 18, 45);
-  doc.text('Estación / Módulo:', 18, 52);
-  doc.text('Período Reportado:', 18, 59);
+  doc.text('Supervisor Responsable:', 18, 44);
+  doc.text('Área / Estación:', 18, 51);
+  doc.text('Período Reportado:', 18, 58);
 
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(15, 23, 42); // Slate 900
-  doc.text(`${nombreFuncionario} (${usuario?.usuario || usuario?.email || 'cajera'})`, 60, 45);
-  doc.text(`${nombreEstacion} - ${caja.nombre || 'Atención al Ciudadano'}`, 60, 52);
-  doc.text(`${tituloRango} (Corte: ${fechaHoy} ${horaEmision})`, 60, 59);
+  doc.text(`${nombreResponsable} [${rolResponsable}]`, 65, 44);
+  doc.text(`${nombreEstacion} ${sedeNombre ? `• Sede: ${sedeNombre}` : ''}`, 65, 51);
+  doc.text(`${tituloRango} (Generado: ${fechaHoy} ${horaEmision})`, 65, 58);
 
   // 3. Tarjetas Resumen de Métricas (KPIs)
   const cardY = 68;
@@ -223,12 +252,14 @@ export function generarPdfHistorial({
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.5);
     doc.setTextColor(148, 163, 184);
-    doc.text(nombreFuncionario, 30, finalY + 25);
+    doc.text(nombreResponsable, 30, finalY + 25);
     doc.text('Visto Bueno de Cierre', 137, finalY + 25);
   }
 
   // Descargar el archivo PDF
-  const codigoArchivo = caja.numero === 0 ? 'caja_0_pref' : `caja_${caja.numero}`;
+  const codigoArchivo = caja 
+    ? (caja.numero === 0 ? 'caja_0_pref' : `caja_${caja.numero}`) 
+    : (esTriada ? 'triadas_consolidado' : 'cajas_consolidado');
   const fechaStr = new Date().toISOString().split('T')[0];
-  doc.save(`reporte_tickets_${codigoArchivo}_${fechaStr}.pdf`);
+  doc.save(`reporte_${codigoArchivo}_${rango}_${fechaStr}.pdf`);
 }

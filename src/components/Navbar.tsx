@@ -10,14 +10,15 @@ import {
   Wifi,
   WifiOff,
   Camera,
-  Palette
+  Palette,
+  FileSpreadsheet
 } from 'lucide-react';
 import { wsClient } from '../services/websocketClient';
 import { Caja } from '../types';
 import { LogoInstitucional } from './LogoInstitucional';
 import { useCustomization } from '../context/CustomizationContext';
 
-export type AppView = 'kiosk' | 'caja' | 'triada' | 'pantalla-caja' | 'pantalla-triada' | 'pantalla' | 'admin';
+export type AppView = 'kiosk' | 'caja' | 'triada' | 'pantalla-caja' | 'pantalla-triada' | 'pantalla' | 'admin' | 'reportes';
 
 interface NavbarProps {
   currentView: AppView;
@@ -200,6 +201,24 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <Camera className="w-3.5 h-3.5 text-indigo-400" />
             <span>Pantalla Triada</span>
+          </button>
+
+          {/* CENTRO DE REPORTES (SECCIÓN APARTE) */}
+          <button
+            onClick={() => onViewChange('reportes')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              currentView === 'reportes'
+                ? 'text-white shadow-sm ring-1 ring-emerald-400/50'
+                : 'hover:text-white'
+            }`}
+            style={{
+              backgroundColor: currentView === 'reportes' ? '#047857' : 'transparent',
+              color: currentView === 'reportes' ? '#FFFFFF' : configuracion.textColor
+            }}
+            title="Centro de Reportes y Métricas (Supervisores de Caja, Triada y Administradores)"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Reportes</span>
           </button>
 
           {/* ADMINISTRACIÓN (CONTIENE CONTROL CENTRAL, CAJAS, TRIADA Y PERSONALIZACIÓN) */}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Camera, 
   Sparkles, 
@@ -17,10 +17,10 @@ import {
   Lock, 
   LogIn, 
   Download, 
-  Users,
-  Check,
-  RotateCcw,
-  Aperture,
+  Users, 
+  Check, 
+  RotateCcw, 
+  Aperture, 
   X
 } from 'lucide-react';
 import { Caja, Ticket, Usuario } from '../types';
@@ -45,26 +45,52 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
   usuarios,
   onCambiarCaja
 }) => {
-  // Filtrar solo los módulos de Triada (tipo 'TRIADA')
-  const modulosTriada = cajas.filter(c => c.tipo === 'TRIADA');
-  const moduloActual = modulosTriada.find(c => c.id === cajaId) || modulosTriada[0] || cajas[0];
+  // Filtrar solo los módulos de Triada (tipo 'TRIADA') memoizados
+  const modulosTriada = useMemo(() => {
+    return [...cajas.filter(c => c.tipo === 'TRIADA')].sort((a, b) => a.numero - b.numero);
+  }, [cajas]);
+
+  const cajasRegulares = useMemo(() => {
+    return [...cajas.filter(c => c.tipo !== 'TRIADA')].sort((a, b) => a.numero - b.numero);
+  }, [cajas]);
+
+  // Módulo de triada seleccionado
+  const [selectedTriadaId, setSelectedTriadaId] = useState<number>(() => {
+    const match = modulosTriada.find(c => c.id === cajaId);
+    return match ? match.id : (modulosTriada[0]?.id || 201);
+  });
+
+  const moduloActual = useMemo(() => {
+    const targetId = sessionUsuario?.cajaAsignadaId || selectedTriadaId || cajaId;
+    return modulosTriada.find(c => c.id === targetId) || modulosTriada.find(c => c.id === selectedTriadaId) || modulosTriada.find(c => c.id === cajaId) || modulosTriada[0];
+  }, [modulosTriada, cajaId, selectedTriadaId, sessionUsuario?.cajaAsignadaId]);
 
   const [sessionUsuario, setSessionUsuario] = useState<Usuario | null>(() => {
     try {
-      const stored = localStorage.getItem(`triada_session_${cajaId}`);
-      return stored ? JSON.parse(stored) : null;
+      const targetId = selectedTriadaId || cajaId;
+      const stored = localStorage.getItem(`triada_session_${targetId}`);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        const u = parsed.user || parsed;
+        if (u && (u.rol === 'FUNCIONARIO_CAJA' || u.rol === 'SUPERVISOR_CAJA')) return null;
+        return u;
+      }
+      const activo = localStorage.getItem('triada_funcionario_activo');
+      if (activo) {
+        const parsed = JSON.parse(activo);
+        if (parsed.cajaId === targetId && parsed.user) {
+          if (parsed.user.rol === 'FUNCIONARIO_CAJA' || parsed.user.rol === 'SUPERVISOR_CAJA') return null;
+          return parsed.user;
+        }
+      }
     } catch {
       return null;
     }
+    return null;
   });
 
-  const cajasRegulares = cajas.filter(c => c.tipo !== 'TRIADA');
-  const [tabEstacionLogin, setTabEstacionLogin] = useState<'TRIADAS' | 'CAJAS'>('TRIADAS');
   const [tabEstacionCambio, setTabEstacionCambio] = useState<'TRIADAS' | 'CAJAS'>('TRIADAS');
-
-  const [selectedTriadaId, setSelectedTriadaId] = useState<number>(() => {
-    return moduloActual?.id || 201;
-  });
+  const [tabEstacionLogin, setTabEstacionLogin] = useState<'TRIADAS'>('TRIADAS');
 
   const [inputUsuario, setInputUsuario] = useState('');
   const [inputPassword, setInputPassword] = useState('');
@@ -75,47 +101,29 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mostrarCambioModulo, setMostrarCambioModulo] = useState(false);
-  const [tabActiva, setTabActiva] = useState<'ATENCION' | 'COLA' | 'HISTORIAL'>('ATENCION');
-  const [rangoSeleccionado, setRangoSeleccionado] = useState<'diario' | 'semanal' | 'mensual' | 'anual'>('diario');
-  const [historialTickets, setHistorialTickets] = useState<Ticket[]>([]);
-  const [loadingHistorial, setLoadingHistorial] = useState(false);
+  const [tabActiva, setTabActiva] = useState<'ATENCION' | 'COLA'>('ATENCION');
   const [cronometroSegundos, setCronometroSegundos] = useState(0);
 
-  // Mantener selectedTriadaId sincronizado
+  // Función para que el funcionario seleccione el módulo de triada donde va a entrar
+  const seleccionarTriadaParaLogin = (id: number) => {
+    setSelectedTriadaId(id);
+    onCambiarCaja?.(id);
+  };
+
+  // Mantener selectedTriadaId sincronizado cuando cajaId cambia externamente y no hay sesión activa
   useEffect(() => {
     if (!sessionUsuario && cajaId) {
-      const match = cajas.find(c => c.id === cajaId);
-      if (match) {
-        setSelectedTriadaId(match.id);
-        if (match.tipo === 'TRIADA') {
-          setTabEstacionLogin('TRIADAS');
-        } else {
-          setTabEstacionLogin('CAJAS');
-        }
-      }
+      setSelectedTriadaId(cajaId);
     }
-  }, [cajaId, sessionUsuario, cajas]);
+  }, [cajaId, sessionUsuario]);
 
-  // Tickets en espera específicamente para Triada / Fotografía
-  const colaTriada = ticketsEsperando
-    .filter(t => t.etapa === 'TRIADA' && t.estado === 'ESPERANDO')
-    .sort((a, b) => new Date(a.fechaCreacion).getTime() - new Date(b.fechaCreacion).getTime());
-
-  // Ticket asignado a este módulo de Triada
-  const ticketActual = ticketsActivos.find(t => t.cajaId === moduloActual?.id && (t.estado === 'ASIGNADO' || t.estado === 'LLAMANDO' || t.estado === 'EN_ATENCION'))
-    || (moduloActual?.ticketActualId ? ticketsActivos.find(t => t.id === moduloActual.ticketActualId) : null);
-
-  // Cargar sesión guardada al cambiar de módulo
+  // Mantener la sesión activa guardada en localStorage
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(`triada_session_${cajaId}`);
-      setSessionUsuario(stored ? JSON.parse(stored) : null);
-    } catch {
-      setSessionUsuario(null);
+    if (sessionUsuario && moduloActual?.id) {
+      localStorage.setItem(`triada_session_${moduloActual.id}`, JSON.stringify(sessionUsuario));
+      localStorage.setItem('triada_funcionario_activo', JSON.stringify({ user: sessionUsuario, cajaId: moduloActual.id }));
     }
-    setError(null);
-    setLoginError(null);
-  }, [cajaId]);
+  }, [sessionUsuario, moduloActual?.id]);
 
   // Registrar presencia en WebSocket
   useEffect(() => {
@@ -142,29 +150,6 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
       if (timer) clearInterval(timer);
     };
   }, [ticketActual?.estado, ticketActual?.fechaInicio]);
-
-  // Cargar historial
-  const cargarHistorial = async (rango = rangoSeleccionado) => {
-    if (!moduloActual) return;
-    setLoadingHistorial(true);
-    try {
-      const res = await fetch(`/api/cajas/${moduloActual.id}/historial?rango=${rango}`);
-      if (res.ok) {
-        const data = await res.json();
-        setHistorialTickets(data.tickets || []);
-      }
-    } catch (e) {
-      console.error('Error cargando historial de Triada:', e);
-    } finally {
-      setLoadingHistorial(false);
-    }
-  };
-
-  useEffect(() => {
-    if (tabActiva === 'HISTORIAL') {
-      cargarHistorial(rangoSeleccionado);
-    }
-  }, [tabActiva, moduloActual?.id, rangoSeleccionado]);
 
   const formatearTiempo = (segundos: number) => {
     const min = Math.floor(segundos / 60);
@@ -197,6 +182,10 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error || 'Credenciales inválidas');
+      }
+
+      if (data.user?.rol === 'FUNCIONARIO_CAJA' || data.user?.rol === 'SUPERVISOR_CAJA') {
+        throw new Error('Acceso denegado: Los usuarios creados para Caja son exclusivos para las 8 cajas, NO DEBEN entrar a Triada.');
       }
 
       setSessionUsuario(data.user);
@@ -257,18 +246,6 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
     setSessionUsuario(null);
   };
 
-  // Descargar Reporte PDF oficial de atenciones en Triada
-  const handleDescargarPDF = () => {
-    if (!moduloActual) return;
-    generarPdfHistorial({
-      caja: moduloActual,
-      usuario: sessionUsuario,
-      tickets: historialTickets,
-      tipoEstacion: 'TRIADA',
-      rango: rangoSeleccionado
-    });
-  };
-
   // Acciones en el módulo
   const ejecutarAccion = async (endpoint: string, body?: any) => {
     if (!moduloActual || loading) return;
@@ -284,9 +261,6 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || `Error en la acción ${endpoint}`);
       }
-      if (endpoint === 'finalizar' || endpoint === 'no-presento') {
-        setTimeout(cargarHistorial, 400);
-      }
     } catch (err: any) {
       setError(err.message || 'Error de comunicación con el servidor');
     } finally {
@@ -296,16 +270,17 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
 
   const llamarTurno = (modoForzado?: 'VOZ' | 'PITIDO') => {
     const modo = modoForzado || modoLlamado;
-    return ejecutarAccion('llamar', { modo });
+    return ejecutarAccion('llamar', { modo, ticketId: ticketActual?.id });
   };
 
   const llamarSiguiente = () => {
     return ejecutarAccion('llamar-siguiente', { modo: modoLlamado });
   };
 
-  const iniciarAtencion = () => ejecutarAccion('iniciar');
-  const finalizarAtencion = () => ejecutarAccion('finalizar');
-  const noSePresento = () => ejecutarAccion('no-presento');
+  const iniciarAtencion = () => ejecutarAccion('iniciar', { ticketId: ticketActual?.id });
+  const finalizarAtencion = () => ejecutarAccion('finalizar', { ticketId: ticketActual?.id });
+  const noSePresento = () => ejecutarAccion('no-presento', { ticketId: ticketActual?.id });
+  const reiniciarCajaYTurno = () => ejecutarAccion('reiniciar', { ticketId: ticketActual?.id });
 
   // SI NO HAY SESIÓN: Mostrar pantalla de login para que el funcionario elija su estación
   if (!sessionUsuario) {
@@ -358,7 +333,7 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
                       ? 'bg-indigo-950/80 text-indigo-300 border-indigo-700' 
                       : 'bg-blue-950/80 text-blue-300 border-blue-700'
                   }`}>
-                    Seleccionado: {esTriadaSeleccionada ? 'Triada' : 'Caja'} {estacionSeleccionadaObj?.numero}
+                    Seleccionado: Triada {estacionSeleccionadaObj?.numero}
                   </span>
                 </div>
               </div>
@@ -377,17 +352,7 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
                   >
                     Módulos de Triada / Fotografía (1 a 8)
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setTabEstacionLogin('CAJAS')}
-                    className={`flex-1 py-2 rounded-lg font-bold transition-all cursor-pointer text-center ${
-                      tabEstacionLogin === 'CAJAS'
-                        ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Ventanillas de Caja (0 a 8)
-                  </button>
+                  
                 </div>
 
                 {/* Dropdown directo */}
@@ -400,9 +365,7 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
                       const item = cajas.find(c => c.id === id);
                       if (item?.tipo === 'TRIADA') {
                         setTabEstacionLogin('TRIADAS');
-                      } else {
-                        setTabEstacionLogin('CAJAS');
-                      }
+                      } 
                     }}
                     className="w-full bg-slate-950 text-white font-bold rounded-xl px-3 py-2 border border-slate-800 focus:outline-none focus:border-indigo-500 text-xs cursor-pointer"
                   >
@@ -410,13 +373,6 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
                       {modulosTriada.map((c) => (
                         <option key={c.id} value={c.id}>
                           Triada {c.numero} {c.usuarioNombre ? '(En uso)' : '(Libre)'}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Ventanillas de Caja (0 a 8)">
-                      {cajasRegulares.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.numero === 0 ? 'Caja 0 (Preferencial)' : `Caja ${c.numero}`} {c.usuarioNombre ? '(En uso)' : '(Libre)'}
                         </option>
                       ))}
                     </optgroup>
@@ -469,8 +425,7 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
 
                       <div className="text-xs font-medium text-slate-400 truncate">
                         {esModuloTriada
-                          ? item.nombre.replace(/^Triada \d+\s*-\s*/i, '') || 'Fotografía y Biometría'
-                          : item.nombre.replace(/^Caja \d+\s*-\s*/i, '') || 'Atención al Ciudadano'}
+                          ? item.nombre.replace(/^Triada \d+\s*-\s*/i, '') || 'Fotografía y Biometría': item.nombre.replace(/^Triada \d+\s*-\s*/i, '') || 'Fotografía y Biometría'}
                       </div>
 
                       <div className="mt-2 text-[11px] font-mono">
@@ -500,6 +455,33 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
               </label>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Estación / Módulo de Trabajo donde atenderá hoy:
+                  </label>
+                  <select
+                    value={selectedTriadaId}
+                    onChange={(e) => {
+                      const id = Number(e.target.value);
+                      setSelectedTriadaId(id);
+                      const item = cajas.find(c => c.id === id);
+                      if (item?.tipo === 'TRIADA') {
+                        setTabEstacionLogin('TRIADAS');
+                      } 
+                    }}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-3 text-sm font-bold text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    <optgroup label="Módulos de Triada / Fotografía (1 a 8)">
+                      {modulosTriada.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          Triada {c.numero} — {c.nombre.replace(/^Triada \d+\s*-\s*/i, '')} {c.usuarioNombre ? `(En uso por ${c.usuarioNombre})` : '(Disponible)'}
+                        </option>
+                      ))}
+                    </optgroup>
+                   
+                  </select>
+                </div>
+
                 <div>
                   <label className="block text-xs font-medium text-slate-400 mb-1">
                     Usuario
@@ -590,36 +572,19 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
               </button>
             </div>
 
-            {/* Selector de tipo en modal */}
+            {/* Selector de módulos de triada en modal */}
             <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs mb-4">
               <button
                 type="button"
-                onClick={() => setTabEstacionCambio('TRIADAS')}
-                className={`flex-1 py-1.5 rounded-lg font-bold transition-all cursor-pointer text-center ${
-                  tabEstacionCambio === 'TRIADAS'
-                    ? 'bg-indigo-600 text-white shadow'
-                    : 'text-indigo-400 hover:text-white'
-                }`}
+                className="flex-1 py-1.5 rounded-lg font-bold text-white bg-indigo-600 shadow text-center cursor-default"
               >
                 Módulos de Triada (1 a 8)
-              </button>
-              <button
-                type="button"
-                onClick={() => setTabEstacionCambio('CAJAS')}
-                className={`flex-1 py-1.5 rounded-lg font-bold transition-all cursor-pointer text-center ${
-                  tabEstacionCambio === 'CAJAS'
-                    ? 'bg-blue-600 text-white shadow'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Ventanillas de Caja (0 a 8)
               </button>
             </div>
 
             <div className="grid grid-cols-2 gap-3 mb-6 max-h-72 overflow-y-auto pr-1">
-              {(tabEstacionCambio === 'TRIADAS' ? modulosTriada : cajasRegulares).map((c) => {
+              {modulosTriada.map((c) => {
                 const esActual = c.id === moduloActual.id;
-                const esTriada = c.tipo === 'TRIADA';
 
                 return (
                   <button
@@ -629,28 +594,20 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
                     className={`p-3 rounded-2xl border text-left transition-all ${
                       esActual
                         ? 'bg-indigo-950/50 border-indigo-600/60 opacity-60 cursor-not-allowed'
-                        : esTriada
-                          ? 'bg-slate-950 border-slate-800 hover:border-indigo-500 hover:bg-indigo-950/30 cursor-pointer'
-                          : 'bg-slate-950 border-slate-800 hover:border-blue-500 hover:bg-slate-900 cursor-pointer'
+                        : 'bg-slate-950 border-slate-800 hover:border-indigo-500 hover:bg-indigo-950/30 cursor-pointer'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1">
                       <span className="font-bold text-white text-base">
-                        {esTriada
-                          ? `Triada ${c.numero}`
-                          : c.numero === 0
-                            ? 'Caja 0 (Pref.)'
-                            : `Caja ${c.numero}`}
+                        Triada {c.numero}
                       </span>
                       {esActual && <span className="text-[10px] bg-indigo-600 text-white px-1.5 py-0.5 rounded font-bold">Actual</span>}
                     </div>
                     <p className="text-xs text-slate-300 truncate">
-                      {esTriada
-                        ? c.nombre.replace(/^Triada \d+\s*-\s*/i, '') || 'Fotografía y Biometría'
-                        : c.nombre.replace(/^Caja \d+\s*-\s*/i, '') || 'Atención al Ciudadano'}
+                      {c.nombre.replace(/^Triada \d+\s*-\s*/i, '') || 'Fotografía y Biometría'}
                     </p>
                     <div className="mt-1 text-[11px] text-slate-400">
-                      {c.usuarioNombre ? 'En uso' : 'Libre'}
+                      {c.usuarioNombre ? `En uso por ${c.usuarioNombre}` : 'Libre'}
                     </div>
                   </button>
                 );
@@ -681,9 +638,10 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
               <button
                 onClick={() => setMostrarCambioModulo(true)}
                 title="Cambiar de módulo de Triada"
-                className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-indigo-400 transition-colors"
+                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer border border-slate-700"
               >
-                <ArrowRightLeft className="w-4 h-4" />
+                <ArrowRightLeft className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Cambiar Triada</span>
               </button>
             </div>
             <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
@@ -691,6 +649,14 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
               <span>Operador: <strong className="text-slate-200">{sessionUsuario.nombre}</strong></span>
               <span>•</span>
               <span className="font-mono text-slate-500">@{sessionUsuario.usuario || 'triada'}</span>
+              {sessionUsuario.rol === 'SUPERVISOR_TRIADA' && (
+                <>
+                  <span>•</span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-800">
+                    SUPERVISOR DE TRIADA
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -773,20 +739,6 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
             <span className="px-1.5 py-0.2 rounded-full bg-slate-800 text-slate-300 text-[10px] font-mono">
               {colaTriada.length}
             </span>
-          </div>
-        </button>
-
-        <button
-          onClick={() => setTabActiva('HISTORIAL')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-            tabActiva === 'HISTORIAL'
-              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-              : 'text-slate-400 hover:text-white hover:bg-slate-900'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <FileText className="w-4 h-4" />
-            <span>Historial Hoy</span>
           </div>
         </button>
       </div>
@@ -951,6 +903,24 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
                       </p>
                     </div>
                   )}
+
+                  {/* Barra de Recuperación si el turno se traba o no avanza en Triada */}
+                  <div className="mt-4 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="text-slate-400 flex items-center gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
+                      <span>¿Ocurrió algún error en biometría o el turno no avanza?</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={reiniciarCajaYTurno}
+                      disabled={loading}
+                      title="Reiniciar módulo y reasignar este mismo turno para avanzar"
+                      className="px-3 py-1.5 rounded-xl bg-amber-950/40 hover:bg-amber-900/60 border border-amber-700/60 text-amber-300 font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                      <span>Reiniciar y recaer turno {ticketActual.codigo}</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -1092,112 +1062,6 @@ export const TriadaView: React.FC<TriadaViewProps> = ({
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-950 text-amber-400 border border-amber-800">
                           Esperando en Triada
                         </span>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* VISTA 3: HISTORIAL DE TICKETS ATENDIDOS HOY EN ESTA TRIADA */}
-      {tabActiva === 'HISTORIAL' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl">
-          <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800 mb-4">
-            <div>
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <FileText className="w-5 h-5 text-indigo-400" />
-                <span>Historial de Atenciones en Triada {moduloActual.numero} ({rangoSeleccionado === 'diario' ? 'Hoy' : rangoSeleccionado === 'semanal' ? 'Últimos 7 días' : rangoSeleccionado === 'mensual' ? 'Últimos 30 días' : 'Último año'})</span>
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Total de trámites y fotografías procesadas en este módulo durante el período seleccionado.
-              </p>
-
-              {/* Selector de rango de tiempo para el reporte */}
-              <div className="flex items-center gap-1.5 p-1 bg-slate-950/80 border border-slate-800 rounded-xl mt-3 flex-wrap max-w-max">
-                {(['diario', 'semanal', 'mensual', 'anual'] as const).map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => setRangoSeleccionado(r)}
-                    className={`px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold uppercase transition-all cursor-pointer ${
-                      rangoSeleccionado === r
-                        ? 'bg-indigo-600 text-white shadow'
-                        : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
-                    }`}
-                  >
-                    {r === 'diario' ? 'Diario' : r === 'semanal' ? 'Semanal' : r === 'mensual' ? 'Mensual' : 'Anual'}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                id="btn-descargar-triada-pdf"
-                onClick={handleDescargarPDF}
-                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition-all cursor-pointer"
-              >
-                <FileText className="w-4 h-4" />
-                <span>Descargar Reporte PDF</span>
-              </button>
-
-              <a
-                href={`/api/cajas/${moduloActual.id}/historial-hoy/csv`}
-                download
-                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer"
-              >
-                <Download className="w-4 h-4" />
-                <span>CSV</span>
-              </a>
-            </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-950/60 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800">
-                <tr>
-                  <th className="py-3 px-4">Turno</th>
-                  <th className="py-3 px-4">Ciudadano</th>
-                  <th className="py-3 px-4">Trámite</th>
-                  <th className="py-3 px-4">Duración</th>
-                  <th className="py-3 px-4">Resultado</th>
-                  <th className="py-3 px-4">Hora Fin</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60">
-                {historialTickets.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="py-8 text-center text-slate-500">
-                      {loadingHistorial ? 'Cargando registros...' : 'No se registran atenciones finalizadas hoy en este módulo.'}
-                    </td>
-                  </tr>
-                ) : (
-                  historialTickets.map((t) => (
-                    <tr key={t.id} className="hover:bg-slate-800/30">
-                      <td className="py-3 px-4 font-bold text-white text-sm">
-                        {t.codigo}
-                      </td>
-                      <td className="py-3 px-4 capitalize">
-                        {[t.ciudadanoNombre, t.ciudadanoApellido].filter(Boolean).join(' ') || 'Anónimo'}
-                      </td>
-                      <td className="py-3 px-4">{t.tramite}</td>
-                      <td className="py-3 px-4 font-mono text-slate-300">
-                        {t.duracionAtencionSegundos ? `${t.duracionAtencionSegundos}s` : '-'}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          t.estado === 'FINALIZADO'
-                            ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                            : 'bg-rose-950 text-rose-300 border border-rose-800'
-                        }`}>
-                          {t.estado}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 font-mono text-slate-400">
-                        {t.fechaFinalizacion ? new Date(t.fechaFinalizacion).toLocaleTimeString('es-ES') : '-'}
                       </td>
                     </tr>
                   ))

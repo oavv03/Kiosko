@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Bell, 
   Play, 
@@ -25,7 +25,8 @@ import {
   ArrowRightLeft,
   X,
   Sparkles,
-  FileText
+  FileText,
+  RotateCcw
 } from 'lucide-react';
 import { Caja, Ticket, Usuario } from '../types';
 import { wsClient } from '../services/websocketClient';
@@ -53,30 +54,51 @@ export const CajaView: React.FC<CajaViewProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [cronometroSegundos, setCronometroSegundos] = useState(0);
   const [modoLlamado, setModoLlamado] = useState<'VOZ' | 'PITIDO'>('VOZ');
-  const [tabActiva, setTabActiva] = useState<'ATENCION' | 'HISTORIAL'>('ATENCION');
-  const [rangoSeleccionado, setRangoSeleccionado] = useState<'diario' | 'semanal' | 'mensual' | 'anual'>('diario');
 
-  const cajasRegulares = cajas.filter(c => c.tipo !== 'TRIADA');
-  const modulosTriada = cajas.filter(c => c.tipo === 'TRIADA');
+  // Cajas regulares (Ventanillas 0 a 8) memoizadas
+  const cajasRegulares = useMemo(() => {
+    return [...cajas.filter(c => c.tipo !== 'TRIADA')].sort((a, b) => a.numero - b.numero);
+  }, [cajas]);
 
-  const [tabEstacionLogin, setTabEstacionLogin] = useState<'CAJAS' | 'TRIADAS'>('CAJAS');
-  const [tabEstacionCambio, setTabEstacionCambio] = useState<'CAJAS' | 'TRIADAS'>('CAJAS');
+  const modulosTriada = useMemo(() => {
+    return [...cajas.filter(c => c.tipo === 'TRIADA')].sort((a, b) => a.numero - b.numero);
+  }, [cajas]);
 
-  // Número de estación seleccionada en pantalla de login (Caja 0-8 o Triada 1-8)
+  // Número de estación seleccionada en pantalla de login (Ventanillas de Caja 0 a 8)
   const [selectedCajaId, setSelectedCajaId] = useState<number>(() => {
-    const match = cajas.find(c => c.id === cajaId);
-    return match ? match.id : (cajasRegulares[0]?.id || 1);
+    const match = cajasRegulares.find(c => c.id === cajaId);
+    return match ? match.id : (cajasRegulares.find(c => c.numero === 1)?.id || cajasRegulares[0]?.id || 1);
   });
 
   // Modal para cambiar de caja mientras se está logueado
   const [mostrarCambioCaja, setMostrarCambioCaja] = useState(false);
   const [cambiandoCaja, setCambiandoCaja] = useState(false);
 
+  // Obtener datos de la caja actual (exclusivo de cajas de atención)
+  const caja = useMemo(() => {
+    const targetId = sessionUsuario?.cajaAsignadaId || selectedCajaId || cajaId;
+    return cajasRegulares.find(c => c.id === targetId) || cajasRegulares.find(c => c.id === selectedCajaId) || cajasRegulares.find(c => c.id === cajaId) || cajasRegulares[0];
+  }, [cajasRegulares, cajaId, selectedCajaId, sessionUsuario?.cajaAsignadaId]);
+
   // Autenticación por Usuario y Contraseña para operar la caja
   const [sessionUsuario, setSessionUsuario] = useState<Usuario | null>(() => {
     try {
-      const stored = localStorage.getItem(`caja_session_${cajaId}`);
-      if (stored) return JSON.parse(stored);
+      const targetId = selectedCajaId || cajaId;
+      const stored = localStorage.getItem(`caja_session_${targetId}`);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        const u = parsed.user || parsed;
+        if (u && (u.rol === 'FUNCIONARIO_TRIADA' || u.rol === 'SUPERVISOR_TRIADA')) return null;
+        return u;
+      }
+      const activo = localStorage.getItem('caja_funcionario_activo');
+      if (activo) {
+        const parsed = JSON.parse(activo);
+        if (parsed.cajaId === targetId && parsed.user) {
+          if (parsed.user.rol === 'FUNCIONARIO_TRIADA' || parsed.user.rol === 'SUPERVISOR_TRIADA') return null;
+          return parsed.user;
+        }
+      }
     } catch (e) {}
     return null;
   });
@@ -90,60 +112,30 @@ export const CajaView: React.FC<CajaViewProps> = ({
   const [historialTickets, setHistorialTickets] = useState<any[]>([]);
   const [loadingHistorial, setLoadingHistorial] = useState(false);
 
-  // Obtener datos de la caja actual (exclusivo de cajas de atención)
-  const caja = cajasRegulares.find(c => c.id === cajaId) || cajasRegulares[0];
-
-  // Mantener selectedCajaId sincronizado si cambia cajaId y no hay sesión
-  useEffect(() => {
-    if (!sessionUsuario && cajaId) {
-      const match = cajas.find(c => c.id === cajaId);
-      if (match) {
-        setSelectedCajaId(match.id);
-        if (match.tipo === 'TRIADA') {
-          setTabEstacionLogin('TRIADAS');
-        } else {
-          setTabEstacionLogin('CAJAS');
-        }
-      }
-    }
-  }, [cajaId, sessionUsuario, cajas]);
-
-  // Cargar sesión guardada si cambia de caja
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(`caja_session_${cajaId}`);
-      setSessionUsuario(stored ? JSON.parse(stored) : null);
-    } catch (e) {
-      setSessionUsuario(null);
-    }
-    setError(null);
-    setLoginError(null);
-  }, [cajaId]);
-
-  // Cargar historial del día o rango
-  const cargarHistorial = async (rango = rangoSeleccionado) => {
-    setLoadingHistorial(true);
-    try {
-      const res = await fetch(`/api/cajas/${cajaId}/historial?rango=${rango}`);
-      if (res.ok) {
-        const data = await res.json();
-        setHistorialTickets(data.tickets || []);
-      }
-    } catch (e) {
-      console.error('Error cargando historial de la caja:', e);
-    } finally {
-      setLoadingHistorial(false);
-    }
+  // Función para que el funcionario seleccione la caja donde va a entrar
+  const seleccionarCajaParaLogin = (id: number) => {
+    setSelectedCajaId(id);
+    onCambiarCaja?.(id);
   };
 
+  // Mantener selectedCajaId sincronizado si cambia cajaId por selección externa y no hay sesión activa
   useEffect(() => {
-    if (tabActiva === 'HISTORIAL') {
-      cargarHistorial(rangoSeleccionado);
+    if (!sessionUsuario && cajaId) {
+      setSelectedCajaId(cajaId);
     }
-  }, [tabActiva, cajaId, rangoSeleccionado]);
+  }, [cajaId, sessionUsuario]);
+
+  // Mantener la sesión activa guardada en localStorage
+  useEffect(() => {
+    if (sessionUsuario && caja?.id) {
+      localStorage.setItem(`caja_session_${caja.id}`, JSON.stringify(sessionUsuario));
+      localStorage.setItem('caja_funcionario_activo', JSON.stringify({ user: sessionUsuario, cajaId: caja.id }));
+    }
+  }, [sessionUsuario, caja?.id]);
 
   // Buscar el ticket que tiene esta caja (desde la lista de tickets o desde la caja)
-  const ticketActual = ticketsActivos.find(t => t.cajaId === cajaId && (t.estado === 'ASIGNADO' || t.estado === 'LLAMANDO' || t.estado === 'EN_ATENCION')) 
+  const idCajaActiva = caja?.id || selectedCajaId || cajaId;
+  const ticketActual = ticketsActivos.find(t => t.cajaId === idCajaActiva && (t.estado === 'ASIGNADO' || t.estado === 'LLAMANDO' || t.estado === 'EN_ATENCION')) 
     || (caja?.ticketActualId ? ticketsActivos.find(t => t.id === caja.ticketActualId) : null);
 
   // Cola de espera exclusiva para ventanillas de caja (excluye Triada)
@@ -210,9 +202,18 @@ export const CajaView: React.FC<CajaViewProps> = ({
         throw new Error(data.error || 'Credenciales inválidas');
       }
 
-      setSessionUsuario(data.user);
-      localStorage.setItem(`caja_session_${selectedCajaId}`, JSON.stringify(data.user));
-      localStorage.setItem(`triada_session_${selectedCajaId}`, JSON.stringify(data.user));
+      if (data.user?.rol === 'FUNCIONARIO_TRIADA' || data.user?.rol === 'SUPERVISOR_TRIADA') {
+        throw new Error('Acceso denegado: Los usuarios de Triada son exclusivos para las 8 Triadas, NO DEBEN entrar a Caja.');
+      }
+
+      const userConCaja: Usuario = {
+        ...data.user,
+        cajaAsignadaId: selectedCajaId
+      };
+
+      setSessionUsuario(userConCaja);
+      localStorage.setItem(`caja_session_${selectedCajaId}`, JSON.stringify(userConCaja));
+      localStorage.setItem('caja_funcionario_activo', JSON.stringify({ user: userConCaja, cajaId: selectedCajaId }));
       onCambiarCaja?.(selectedCajaId);
       setInputPassword('');
     } catch (err: any) {
@@ -222,20 +223,22 @@ export const CajaView: React.FC<CajaViewProps> = ({
     }
   };
 
-  // Cambiar a otra caja manteniendo la sesión activa
+  // Cambiar a otra caja manteniendo la sesión activa del funcionario
   const handleCambiarCaja = async (nuevaCajaId: number) => {
-    if (!sessionUsuario || nuevaCajaId === cajaId) {
+    const idActual = caja?.id || cajaId;
+    if (!sessionUsuario || nuevaCajaId === idActual) {
       setMostrarCambioCaja(false);
       return;
     }
     setCambiandoCaja(true);
+    setError(null);
     try {
       const res = await fetch('/api/auth/cambiar-caja', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           usuarioId: sessionUsuario.id,
-          cajaIdActual: cajaId,
+          cajaIdActual: idActual,
           nuevoCajaId: nuevaCajaId
         })
       });
@@ -245,10 +248,20 @@ export const CajaView: React.FC<CajaViewProps> = ({
         throw new Error(err.error || 'No se pudo cambiar de caja');
       }
 
-      localStorage.removeItem(`caja_session_${cajaId}`);
-      localStorage.removeItem(`triada_session_${cajaId}`);
-      localStorage.setItem(`caja_session_${nuevaCajaId}`, JSON.stringify(sessionUsuario));
-      localStorage.setItem(`triada_session_${nuevaCajaId}`, JSON.stringify(sessionUsuario));
+      // Actualizar la sesión del usuario asignándole la nueva caja
+      const usuarioMovido: Usuario = {
+        ...sessionUsuario,
+        cajaAsignadaId: nuevaCajaId
+      };
+      setSessionUsuario(usuarioMovido);
+      setSelectedCajaId(nuevaCajaId);
+
+      // Actualizar almacenamiento local
+      localStorage.removeItem(`caja_session_${idActual}`);
+      localStorage.setItem(`caja_session_${nuevaCajaId}`, JSON.stringify(usuarioMovido));
+      localStorage.setItem('caja_funcionario_activo', JSON.stringify({ user: usuarioMovido, cajaId: nuevaCajaId }));
+
+      // Notificar al componente padre
       onCambiarCaja?.(nuevaCajaId);
       setMostrarCambioCaja(false);
     } catch (e: any) {
@@ -260,34 +273,20 @@ export const CajaView: React.FC<CajaViewProps> = ({
 
   // Logout de la caja
   const handleLogout = async () => {
+    const idActual = caja?.id || cajaId;
     try {
       await fetch('/api/auth/logout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cajaId })
+        body: JSON.stringify({ cajaId: idActual })
       });
     } catch (e) {
       console.error(e);
     }
-    localStorage.removeItem(`caja_session_${cajaId}`);
+    localStorage.removeItem(`caja_session_${idActual}`);
+    localStorage.removeItem('caja_funcionario_activo');
     setSessionUsuario(null);
-  };
-
-  // Descargar CSV del historial del día
-  const handleDescargarCSV = () => {
-    window.location.href = `/api/cajas/${cajaId}/historial-hoy/csv`;
-  };
-
-  // Descargar Reporte PDF oficial de tickets atendidos por la cajera
-  const handleDescargarPDF = () => {
-    if (!caja) return;
-    generarPdfHistorial({
-      caja,
-      usuario: sessionUsuario,
-      tickets: historialTickets,
-      tipoEstacion: 'CAJA',
-      rango: rangoSeleccionado
-    });
+    setInputPassword('');
   };
 
   // Acciones del funcionario
@@ -295,8 +294,9 @@ export const CajaView: React.FC<CajaViewProps> = ({
     if (loading) return;
     setLoading(true);
     setError(null);
+    const idCaja = caja?.id || selectedCajaId || cajaId;
     try {
-      const res = await fetch(`/api/cajas/${cajaId}/${endpoint}`, {
+      const res = await fetch(`/api/cajas/${idCaja}/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: body ? JSON.stringify(body) : undefined
@@ -304,10 +304,6 @@ export const CajaView: React.FC<CajaViewProps> = ({
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || `Error en la acción ${endpoint}`);
-      }
-      // Refrescar historial si terminó o no se presentó
-      if (endpoint === 'finalizar' || endpoint === 'no-presento') {
-        setTimeout(cargarHistorial, 400);
       }
     } catch (err: any) {
       setError(err.message || 'Error de comunicación con el servidor');
@@ -318,18 +314,18 @@ export const CajaView: React.FC<CajaViewProps> = ({
 
   const llamarTurno = (modoForzado?: 'VOZ' | 'PITIDO') => {
     const modo = modoForzado || modoLlamado;
-    return ejecutarAccion('llamar', { modo });
+    return ejecutarAccion('llamar', { modo, ticketId: ticketActual?.id });
   };
   const llamarSiguiente = () => ejecutarAccion('llamar-siguiente', { modo: modoLlamado });
-  const iniciarAtencion = () => ejecutarAccion('iniciar');
-  const finalizarAtencion = () => ejecutarAccion('finalizar');
-  const finalizarYEnviarATriada = () => ejecutarAccion('finalizar-y-triada');
-  const noSePresento = () => ejecutarAccion('no-presento');
+  const iniciarAtencion = () => ejecutarAccion('iniciar', { ticketId: ticketActual?.id });
+  const finalizarAtencion = () => ejecutarAccion('finalizar', { ticketId: ticketActual?.id });
+  const finalizarYEnviarATriada = () => ejecutarAccion('finalizar-y-triada', { ticketId: ticketActual?.id });
+  const noSePresento = () => ejecutarAccion('no-presento', { ticketId: ticketActual?.id });
+  const reiniciarCajaYTurno = () => ejecutarAccion('reiniciar', { ticketId: ticketActual?.id });
 
-  // SI NO HAY SESIÓN INICIADA: Pantalla donde el funcionario elige su estación e inicia sesión
+  // SI NO HAY SESIÓN INICIADA: Pantalla donde la cajera elige su ventanilla e inicia sesión
   if (!sessionUsuario) {
-    const estacionSeleccionadaObj = cajas.find(c => c.id === selectedCajaId) || cajasRegulares[0];
-    const esTriadaSeleccionada = estacionSeleccionadaObj?.tipo === 'TRIADA';
+    const estacionSeleccionadaObj = cajasRegulares.find(c => c.id === selectedCajaId) || cajasRegulares[0];
 
     return (
       <div className="max-w-4xl mx-auto px-4 py-8 sm:py-12">
@@ -337,18 +333,14 @@ export const CajaView: React.FC<CajaViewProps> = ({
           {/* Cabecera del Login */}
           <div className="text-center mb-8 flex flex-col items-center">
             <LogoInstitucional variant="login" className="justify-center mb-4" />
-            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg ${
-              esTriadaSeleccionada 
-                ? 'bg-indigo-600/20 border border-indigo-500/40 text-indigo-400 shadow-indigo-500/10'
-                : 'bg-blue-600/20 border border-blue-500/40 text-blue-400 shadow-blue-500/10'
-            }`}>
+            <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg bg-blue-600/20 border border-blue-500/40 text-blue-400 shadow-blue-500/10">
               <Lock className="w-7 h-7" />
             </div>
             <h2 className="text-2xl sm:text-3xl font-black text-white font-display">
-              Acceso a Estación de Trabajo del Funcionario
+              Atención al Cliente — Ventanillas de Caja
             </h2>
             <p className="text-sm text-slate-400 mt-1 max-w-lg mx-auto">
-              Seleccione la estación (Ventanilla de Caja o Módulo de Triada) en la que atenderá hoy e ingrese con sus credenciales.
+              Seleccione la ventanilla de caja (0 a 8) en la que atenderá hoy e ingrese con sus credenciales para iniciar sesión.
             </p>
           </div>
 
@@ -360,82 +352,44 @@ export const CajaView: React.FC<CajaViewProps> = ({
           )}
 
           <form onSubmit={handleLogin} className="space-y-6">
-            {/* 1. SELECCIÓN DE LA ESTACIÓN DE TRABAJO */}
+            {/* 1. SELECCIÓN DE LA VENTANILLA DE CAJA */}
             <div>
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
                 <label className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-                  <span className={`w-5 h-5 rounded-full text-white flex items-center justify-center text-[11px] font-bold ${
-                    esTriadaSeleccionada ? 'bg-indigo-600' : 'bg-blue-600'
-                  }`}>
+                  <span className="w-5 h-5 rounded-full text-white flex items-center justify-center text-[11px] font-bold bg-blue-600">
                     1
                   </span>
-                  <span>Seleccione la estación donde iniciará sesión:</span>
+                  <span>Seleccione la ventanilla de caja donde iniciará sesión:</span>
                 </label>
                 <div className="flex items-center gap-2">
-                  <span className={`text-xs font-bold px-3 py-1 rounded-full border ${
-                    esTriadaSeleccionada 
-                      ? 'bg-indigo-950/80 text-indigo-300 border-indigo-700' 
-                      : 'bg-blue-950/80 text-blue-300 border-blue-700'
-                  }`}>
-                    Seleccionado: {esTriadaSeleccionada ? 'Triada' : 'Caja'} {estacionSeleccionadaObj?.numero}
+                  <span className="text-xs font-bold px-3 py-1 rounded-full border bg-blue-950/80 text-blue-300 border-blue-700">
+                    Seleccionado: Caja {estacionSeleccionadaObj?.numero} {estacionSeleccionadaObj?.numero === 0 ? '(Preferencial)' : ''}
                   </span>
                 </div>
               </div>
 
-              {/* Selector Desplegable Rápido y Tabs de tipo de estación */}
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-4">
-                <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs flex-1">
-                  <button
-                    type="button"
-                    onClick={() => setTabEstacionLogin('CAJAS')}
-                    className={`flex-1 py-2 rounded-lg font-bold transition-all cursor-pointer text-center ${
-                      tabEstacionLogin === 'CAJAS'
-                        ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
+              {/* Selector Desplegable Rápido y Resumen de Ventanillas */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="px-3 py-1.5 rounded-xl bg-blue-600 text-white font-bold text-xs shadow-md shadow-blue-600/30">
                     Ventanillas de Caja (0 a 8)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTabEstacionLogin('TRIADAS')}
-                    className={`flex-1 py-2 rounded-lg font-bold transition-all cursor-pointer text-center ${
-                      tabEstacionLogin === 'TRIADAS'
-                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                        : 'text-indigo-400 hover:text-white'
-                    }`}
-                  >
-                    Módulos de Triada / Fotografía (1 a 8)
-                  </button>
+                  </span>
+                  <span className="text-xs text-slate-400">
+                    {cajasRegulares.length} ventanillas disponibles
+                  </span>
                 </div>
 
                 {/* Dropdown directo */}
-                <div className="sm:w-64">
+                <div className="sm:w-72">
                   <select
                     value={selectedCajaId}
-                    onChange={(e) => {
-                      const id = Number(e.target.value);
-                      setSelectedCajaId(id);
-                      const item = cajas.find(c => c.id === id);
-                      if (item?.tipo === 'TRIADA') {
-                        setTabEstacionLogin('TRIADAS');
-                      } else {
-                        setTabEstacionLogin('CAJAS');
-                      }
-                    }}
+                    onChange={(e) => seleccionarCajaParaLogin(Number(e.target.value))}
                     className="w-full bg-slate-950 text-white font-bold rounded-xl px-3 py-2 border border-slate-800 focus:outline-none focus:border-blue-500 text-xs cursor-pointer"
                   >
                     <optgroup label="Ventanillas de Caja (0 a 8)">
                       {cajasRegulares.map((c) => (
                         <option key={c.id} value={c.id}>
-                          {c.numero === 0 ? 'Caja 0 (Preferencial)' : `Caja ${c.numero}`} {c.usuarioNombre ? '(En uso)' : '(Libre)'}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Módulos de Triada / Fotografía (1 a 8)">
-                      {modulosTriada.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          Triada {c.numero} {c.usuarioNombre ? '(En uso)' : '(Libre)'}
+                          {c.numero === 0 ? 'Caja 0 (Preferencial)' : `Caja ${c.numero}`} — {c.nombre.replace(/^Caja \d+\s*-\s*/i, '')} {c.usuarioNombre ? `(En uso: ${c.usuarioNombre})` : '(Libre)'}
                         </option>
                       ))}
                     </optgroup>
@@ -443,58 +397,49 @@ export const CajaView: React.FC<CajaViewProps> = ({
                 </div>
               </div>
 
-              {/* Tarjetas Interactivas de Selección de Estación */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 gap-3">
-                {(tabEstacionLogin === 'CAJAS' ? cajasRegulares : modulosTriada).map((item) => {
+              {/* Tarjetas Interactivas de Selección de Caja (Caja 0 a 8) */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {cajasRegulares.map((item) => {
                   const esSeleccionada = item.id === selectedCajaId;
                   const tieneOperador = Boolean(item.usuarioActualId || item.usuarioNombre);
                   const estaDisponible = item.estado === 'DISPONIBLE';
-                  const esModuloTriada = item.tipo === 'TRIADA';
 
                   return (
                     <button
                       key={item.id}
                       type="button"
-                      id={`select-estacion-${item.numero}`}
-                      onClick={() => setSelectedCajaId(item.id)}
+                      id={`select-caja-${item.numero}`}
+                      onClick={() => seleccionarCajaParaLogin(item.id)}
                       className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer relative ${
                         esSeleccionada
-                          ? esModuloTriada
-                            ? 'bg-indigo-950/90 border-indigo-500 ring-2 ring-indigo-500/40 shadow-xl shadow-indigo-950 text-white'
-                            : 'bg-blue-950/90 border-blue-500 ring-2 ring-blue-500/40 shadow-xl shadow-blue-950 text-white'
+                          ? 'bg-blue-950/90 border-blue-500 ring-2 ring-blue-500/40 shadow-xl shadow-blue-950 text-white'
                           : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-950'
                       }`}
                     >
                       <div className="flex items-center justify-between mb-1.5">
                         <span className="text-lg font-black font-display text-white">
-                          {esModuloTriada 
-                            ? `Triada ${item.numero}` 
-                            : item.numero === 0 
-                              ? 'Caja 0 (Pref.)' 
-                              : `Caja ${item.numero}`}
+                          {item.numero === 0 
+                            ? 'Caja 0 (Pref.)' 
+                            : `Caja ${item.numero}`}
                         </span>
                         {esSeleccionada ? (
-                          <span className={`w-5 h-5 rounded-full text-white flex items-center justify-center text-xs font-bold shadow ${
-                            esModuloTriada ? 'bg-indigo-600' : 'bg-blue-600'
-                          }`}>
+                          <span className="w-5 h-5 rounded-full text-white flex items-center justify-center text-xs font-bold shadow bg-blue-600">
                             ✓
                           </span>
                         ) : (
-                          <span className="w-2 h-2 rounded-full bg-slate-700" />
+                          <span className={`w-2 h-2 rounded-full ${tieneOperador ? 'bg-amber-400' : 'bg-slate-700'}`} />
                         )}
                       </div>
 
                       <p className="text-xs font-semibold truncate text-slate-300">
-                        {esModuloTriada
-                          ? item.nombre.replace(/^Triada \d+\s*-\s*/i, '') || 'Fotografía y Biometría'
-                          : item.nombre.replace(/^Caja \d+\s*-\s*/i, '') || 'Atención al Ciudadano'}
+                        {item.nombre.replace(/^Caja \d+\s*-\s*/i, '') || (item.numero === 0 ? 'Atención Preferencial' : 'Atención al Ciudadano')}
                       </p>
 
                       <div className="mt-2 text-[11px]">
                         {tieneOperador ? (
                           <span className="text-amber-400 flex items-center gap-1 font-medium truncate">
                             <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
-                            <span className="truncate">En uso</span>
+                            <span className="truncate">En uso por {item.usuarioNombre}</span>
                           </span>
                         ) : estaDisponible ? (
                           <span className="text-emerald-400 flex items-center gap-1 font-semibold">
@@ -517,15 +462,32 @@ export const CajaView: React.FC<CajaViewProps> = ({
             {/* 2. CREDENCIALES DEL FUNCIONARIO */}
             <div className="pt-4 border-t border-slate-800">
               <label className="text-xs font-bold uppercase tracking-wider text-slate-300 block mb-3 flex items-center gap-2">
-                <span className={`w-5 h-5 rounded-full text-white flex items-center justify-center text-[11px] font-bold ${
-                  esTriadaSeleccionada ? 'bg-indigo-600' : 'bg-blue-600'
-                }`}>
+                <span className="w-5 h-5 rounded-full text-white flex items-center justify-center text-[11px] font-bold bg-blue-600">
                   2
                 </span>
                 <span>Ingrese sus credenciales de acceso:</span>
               </label>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="sm:col-span-2">
+                  <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                    Estación / Ventanilla de Trabajo donde atenderá hoy:
+                  </label>
+                  <select
+                    value={selectedCajaId}
+                    onChange={(e) => seleccionarCajaParaLogin(Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-3 text-sm font-bold text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+                  >
+                    <optgroup label="Ventanillas de Caja (0 a 8)">
+                      {cajasRegulares.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.numero === 0 ? 'Caja 0 (Preferencial)' : `Caja ${c.numero}`} — {c.nombre.replace(/^Caja \d+\s*-\s*/i, '')} {c.usuarioNombre ? `(En uso por ${c.usuarioNombre})` : '(Disponible)'}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </div>
+
                 <div>
                   <label className="text-xs font-semibold text-slate-300 block mb-1">
                     Usuario o Correo
@@ -534,7 +496,7 @@ export const CajaView: React.FC<CajaViewProps> = ({
                     <input
                       type="text"
                       required
-                      placeholder="Ej: funcionario1"
+                      placeholder="Ej: juan o maria"
                       value={inputUsuario}
                       onChange={(e) => setInputUsuario(e.target.value)}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 pl-10"
@@ -565,11 +527,7 @@ export const CajaView: React.FC<CajaViewProps> = ({
             <button
               type="submit"
               disabled={loginLoading}
-              className={`w-full py-3.5 rounded-2xl text-white font-bold text-base shadow-xl flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                esTriadaSeleccionada
-                  ? 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/30'
-                  : 'bg-blue-600 hover:bg-blue-500 shadow-blue-600/30'
-              }`}
+              className="w-full py-3.5 rounded-2xl text-white font-bold text-base shadow-xl flex items-center justify-center gap-2 transition-all cursor-pointer bg-blue-600 hover:bg-blue-500 shadow-blue-600/30"
             >
               {loginLoading ? (
                 <span>Iniciando sesión...</span>
@@ -577,7 +535,7 @@ export const CajaView: React.FC<CajaViewProps> = ({
                 <>
                   <LogIn className="w-5 h-5" />
                   <span>
-                    Iniciar Sesión y Atender en {esTriadaSeleccionada ? 'Triada' : 'Caja'} {estacionSeleccionadaObj?.numero}
+                    Iniciar Sesión y Atender en Caja {estacionSeleccionadaObj?.numero} {estacionSeleccionadaObj?.numero === 0 ? '(Preferencial)' : ''}
                   </span>
                 </>
               )}
@@ -619,7 +577,7 @@ export const CajaView: React.FC<CajaViewProps> = ({
                   Cambiar Estación de Trabajo
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Seleccione la nueva estación (Ventanilla o Módulo de Triada) a la que desea trasladarse:
+                  Seleccione la nueva ventanilla de caja a la que desea trasladarse:
                 </p>
               </div>
               <button
@@ -630,36 +588,19 @@ export const CajaView: React.FC<CajaViewProps> = ({
               </button>
             </div>
 
-            {/* Selector de tipo en modal */}
+            {/* Selector de ventanillas de caja en modal */}
             <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs mb-4">
               <button
                 type="button"
-                onClick={() => setTabEstacionCambio('CAJAS')}
-                className={`flex-1 py-1.5 rounded-lg font-bold transition-all cursor-pointer text-center ${
-                  tabEstacionCambio === 'CAJAS'
-                    ? 'bg-blue-600 text-white shadow'
-                    : 'text-slate-400 hover:text-white'
-                }`}
+                className="flex-1 py-1.5 rounded-lg font-bold text-white bg-blue-600 shadow text-center cursor-default"
               >
                 Ventanillas de Caja (0 a 8)
-              </button>
-              <button
-                type="button"
-                onClick={() => setTabEstacionCambio('TRIADAS')}
-                className={`flex-1 py-1.5 rounded-lg font-bold transition-all cursor-pointer text-center ${
-                  tabEstacionCambio === 'TRIADAS'
-                    ? 'bg-indigo-600 text-white shadow'
-                    : 'text-indigo-400 hover:text-white'
-                }`}
-              >
-                Módulos de Triada (1 a 8)
               </button>
             </div>
 
             <div className="grid grid-cols-2 gap-3 mb-6 max-h-72 overflow-y-auto pr-1">
-              {(tabEstacionCambio === 'CAJAS' ? cajasRegulares : modulosTriada).map((c) => {
-                const esActual = c.id === cajaId;
-                const esTriada = c.tipo === 'TRIADA';
+              {cajasRegulares.map((c) => {
+                const esActual = c.id === (caja?.id || cajaId);
 
                 return (
                   <button
@@ -669,28 +610,22 @@ export const CajaView: React.FC<CajaViewProps> = ({
                     className={`p-3 rounded-2xl border text-left transition-all ${
                       esActual
                         ? 'bg-blue-950/50 border-blue-600/60 opacity-60 cursor-not-allowed'
-                        : esTriada
-                          ? 'bg-slate-950 border-slate-800 hover:border-indigo-500 hover:bg-indigo-950/30 cursor-pointer'
-                          : 'bg-slate-950 border-slate-800 hover:border-blue-500 hover:bg-slate-900 cursor-pointer'
+                        : 'bg-slate-950 border-slate-800 hover:border-blue-500 hover:bg-slate-900 cursor-pointer'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1">
                       <span className="font-bold text-white text-base">
-                        {esTriada 
-                          ? `Triada ${c.numero}` 
-                          : c.numero === 0 
-                            ? 'Caja 0 (Pref.)' 
-                            : `Caja ${c.numero}`}
+                        {c.numero === 0 
+                          ? 'Caja 0 (Pref.)' 
+                          : `Caja ${c.numero}`}
                       </span>
-                      {esActual && <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded font-bold">Actual</span>}
+                      {esActual && <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded font-bold">Caja Actual</span>}
                     </div>
                     <p className="text-xs text-slate-300 truncate">
-                      {esTriada 
-                        ? c.nombre.replace(/^Triada \d+\s*-\s*/i, '') || 'Fotografía y Biometría'
-                        : c.nombre.replace(/^Caja \d+\s*-\s*/i, '') || 'Atención al Ciudadano'}
+                      {c.nombre.replace(/^Caja \d+\s*-\s*/i, '') || (c.numero === 0 ? 'Atención Preferencial' : 'Atención al Ciudadano')}
                     </p>
                     <div className="mt-1 text-[11px] text-slate-400">
-                      {c.usuarioNombre ? 'En uso' : 'Libre'}
+                      {c.usuarioNombre ? `En uso por ${c.usuarioNombre}` : 'Libre'}
                     </div>
                   </button>
                 );
@@ -719,11 +654,12 @@ export const CajaView: React.FC<CajaViewProps> = ({
                 {caja.nombre}
               </h2>
               <button
+                type="button"
                 onClick={() => setMostrarCambioCaja(true)}
-                title="Cambiar a otra caja"
-                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer border border-slate-700"
+                title="Cambiar a otra ventanilla de caja"
+                className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-md shadow-blue-600/30 cursor-pointer border border-blue-500"
               >
-                <ArrowRightLeft className="w-3.5 h-3.5 text-blue-400" />
+                <ArrowRightLeft className="w-3.5 h-3.5 text-white" />
                 <span>Cambiar Caja</span>
               </button>
             </div>
@@ -736,6 +672,14 @@ export const CajaView: React.FC<CajaViewProps> = ({
               </span>
               <span className="text-slate-600">•</span>
               <span className="font-mono text-slate-400">@{sessionUsuario.usuario || sessionUsuario.email.split('@')[0]}</span>
+              {sessionUsuario.rol === 'SUPERVISOR_CAJA' && (
+                <>
+                  <span className="text-slate-600">•</span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-950 text-blue-300 border border-blue-800">
+                    SUPERVISOR DE CAJA
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -777,51 +721,6 @@ export const CajaView: React.FC<CajaViewProps> = ({
         </div>
       </div>
 
-      {/* Pestañas de Navegación: Atención Activa vs Historial del Día y Botón Descargar PDF */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-6 border-b border-slate-800 pb-2">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setTabActiva('ATENCION')}
-            className={`px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 transition-all cursor-pointer ${
-              tabActiva === 'ATENCION'
-                ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-            }`}
-          >
-            <Activity className="w-4 h-4" />
-            <span>Atención Activa</span>
-            {ticketActual && (
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-            )}
-          </button>
-
-          <button
-            onClick={() => setTabActiva('HISTORIAL')}
-            className={`px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 transition-all cursor-pointer ${
-              tabActiva === 'HISTORIAL'
-                ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-            }`}
-          >
-            <History className="w-4 h-4" />
-            <span>Historial de la Jornada</span>
-            <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 text-xs font-mono">
-              {historialTickets.length}
-            </span>
-          </button>
-        </div>
-
-        {/* Botón Destacado: Descargar PDF de tickets atendidos por esta cajera */}
-        <button
-          onClick={handleDescargarPDF}
-          title="Descargar Reporte Oficial en PDF de los tickets atendidos en esta caja"
-          className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-bold flex items-center gap-2 shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
-        >
-          <FileText className="w-4 h-4" />
-          <span>Descargar Reporte PDF ({historialTickets.length})</span>
-        </button>
-      </div>
-
       {error && (
         <div className="mb-4 p-4 rounded-2xl bg-rose-950/40 border border-rose-800 text-rose-300 text-xs sm:text-sm flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -834,9 +733,8 @@ export const CajaView: React.FC<CajaViewProps> = ({
         </div>
       )}
 
-      {/* VISTA 1: ATENCIÓN ACTIVA */}
-      {tabActiva === 'ATENCION' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* ATENCIÓN ACTIVA EN VENTANILLA DE CAJA */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Columna Izquierda: Ticket en Turno */}
           <div className="lg:col-span-2 space-y-6">
             {ticketActual ? (
@@ -1087,6 +985,24 @@ export const CajaView: React.FC<CajaViewProps> = ({
                       </p>
                     </div>
                   )}
+
+                  {/* Barra de Recuperación si el turno se traba o no avanza */}
+                  <div className="mt-4 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="text-slate-400 flex items-center gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
+                      <span>¿Ocurrió algún error o el turno no avanza?</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={reiniciarCajaYTurno}
+                      disabled={loading}
+                      title="Reiniciar caja y reasignar este mismo turno para avanzar"
+                      className="px-3 py-1.5 rounded-xl bg-amber-950/40 hover:bg-amber-900/60 border border-amber-700/60 text-amber-300 font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                      <span>Reiniciar y recaer turno {ticketActual.codigo}</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -1170,170 +1086,6 @@ export const CajaView: React.FC<CajaViewProps> = ({
             </div>
           </div>
         </div>
-      )}
-
-      {/* VISTA 2: HISTORIAL DEL DÍA */}
-      {tabActiva === 'HISTORIAL' && (
-        <div className="space-y-6">
-          {/* Métricas del día de la caja */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow">
-              <span className="text-[11px] uppercase tracking-wider font-bold text-slate-400 block">
-                {rangoSeleccionado === 'diario' ? 'Total Atendidos Hoy' : rangoSeleccionado === 'semanal' ? 'Atendidos Semanal' : rangoSeleccionado === 'mensual' ? 'Atendidos Mensual' : 'Atendidos Anual'}
-              </span>
-              <div className="text-2xl sm:text-3xl font-black text-white mt-1 font-display">{totalAtendidos}</div>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow">
-              <span className="text-[11px] uppercase tracking-wider font-bold text-slate-400 block">Finalizados con Éxito</span>
-              <div className="text-2xl sm:text-3xl font-black text-emerald-400 mt-1 font-display">{finalizados}</div>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow">
-              <span className="text-[11px] uppercase tracking-wider font-bold text-slate-400 block">No Presentados</span>
-              <div className="text-2xl sm:text-3xl font-black text-rose-400 mt-1 font-display">{noPresentados}</div>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow">
-              <span className="text-[11px] uppercase tracking-wider font-bold text-slate-400 block">Tiempo Promedio</span>
-              <div className="text-2xl sm:text-3xl font-black text-blue-400 mt-1 font-mono">
-                {Math.floor(promedioSegundos / 60)}m {promedioSegundos % 60}s
-              </div>
-            </div>
-          </div>
-
-          {/* Tabla de Historial con Botón de Descarga CSV */}
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl">
-            <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800 mb-4">
-              <div>
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  <FileSpreadsheet className="w-5 h-5 text-emerald-400" />
-                  Registro de Tickets Atendidos ({rangoSeleccionado === 'diario' ? 'Hoy' : rangoSeleccionado === 'semanal' ? 'Últimos 7 días' : rangoSeleccionado === 'mensual' ? 'Últimos 30 días' : 'Último año'})
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Reporte oficial de turnos despachados en {caja.nombre} durante el período seleccionado.
-                </p>
-
-                {/* Selector de rango de tiempo para el reporte */}
-                <div className="flex items-center gap-1.5 p-1 bg-slate-950/80 border border-slate-800 rounded-xl mt-3 flex-wrap max-w-max">
-                  {(['diario', 'semanal', 'mensual', 'anual'] as const).map((r) => (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() => setRangoSeleccionado(r)}
-                      className={`px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold uppercase transition-all cursor-pointer ${
-                        rangoSeleccionado === r
-                          ? 'bg-blue-600 text-white shadow'
-                          : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
-                      }`}
-                    >
-                      {r === 'diario' ? 'Diario' : r === 'semanal' ? 'Semanal' : r === 'mensual' ? 'Mensual' : 'Anual'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 flex-wrap">
-                <button
-                  onClick={() => cargarHistorial()}
-                  disabled={loadingHistorial}
-                  title="Refrescar datos del historial"
-                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
-                >
-                  <RefreshCw className={`w-4 h-4 ${loadingHistorial ? 'animate-spin text-blue-400' : ''}`} />
-                </button>
-
-                <button
-                  id="btn-descargar-historial-pdf"
-                  onClick={handleDescargarPDF}
-                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-bold flex items-center gap-2 shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
-                >
-                  <FileText className="w-4 h-4" />
-                  <span>Descargar Reporte PDF</span>
-                </button>
-
-                <button
-                  id="btn-descargar-historial-csv"
-                  onClick={handleDescargarCSV}
-                  disabled={historialTickets.length === 0}
-                  className="px-3.5 py-2 rounded-xl bg-emerald-700/80 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs sm:text-sm font-bold flex items-center gap-2 shadow-md transition-all cursor-pointer"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>CSV</span>
-                </button>
-              </div>
-            </div>
-
-            {loadingHistorial ? (
-              <div className="text-center py-12 text-slate-400 text-sm">
-                <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-blue-400" />
-                Cargando historial de la jornada...
-              </div>
-            ) : historialTickets.length === 0 ? (
-              <div className="text-center py-16 text-slate-500">
-                <Calendar className="w-12 h-12 mx-auto mb-2 opacity-40 text-blue-400" />
-                <p className="text-sm font-semibold text-slate-400">Sin tickets atendidos aún en esta caja</p>
-                <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                  A medida que atienda ciudadanos y finalice sus turnos, se listarán aquí con sus tiempos de duración y podrá exportarlos a CSV.
-                </p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-slate-800 text-slate-400 font-bold uppercase tracking-wider">
-                      <th className="py-3 px-3">Código</th>
-                      <th className="py-3 px-3">Ciudadano</th>
-                      <th className="py-3 px-3">Trámite</th>
-                      <th className="py-3 px-3">Hora Llamado</th>
-                      <th className="py-3 px-3">Duración</th>
-                      <th className="py-3 px-3">Modo</th>
-                      <th className="py-3 px-3">Estado</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60">
-                    {historialTickets.map((t) => (
-                      <tr key={t.id} className="hover:bg-slate-800/40 transition-colors">
-                        <td className="py-3 px-3 font-black text-white font-mono text-sm">
-                          {t.codigo}
-                        </td>
-                        <td className="py-3 px-3 text-slate-200 font-semibold">
-                          {[t.ciudadanoNombre, t.ciudadanoApellido].filter(Boolean).join(' ') || 'N/A'}
-                        </td>
-                        <td className="py-3 px-3 text-slate-300">
-                          {t.tramite}
-                        </td>
-                        <td className="py-3 px-3 font-mono text-slate-400">
-                          {t.fechaLlamado ? new Date(t.fechaLlamado).toLocaleTimeString() : '-'}
-                        </td>
-                        <td className="py-3 px-3 font-mono font-medium text-slate-300">
-                          {t.duracionFormato || `${t.duracionSegundos || 0}s`}
-                        </td>
-                        <td className="py-3 px-3">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            t.modoLlamado === 'PITIDO' ? 'bg-amber-950 text-amber-400' : 'bg-blue-950 text-blue-400'
-                          }`}>
-                            {t.modoLlamado || 'VOZ'}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3">
-                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold ${
-                            t.estado === 'FINALIZADO' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' :
-                            t.estado === 'NO_PRESENTO' ? 'bg-rose-950 text-rose-400 border border-rose-800' :
-                            'bg-blue-950 text-blue-400'
-                          }`}>
-                            {t.estado}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 };

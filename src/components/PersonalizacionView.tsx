@@ -22,11 +22,15 @@ import {
   AlertCircle, 
   Sliders, 
   Layers, 
-  ExternalLink 
+  ExternalLink,
+  Printer,
+  QrCode,
+  FileText
 } from 'lucide-react';
 import { useCustomization } from '../context/CustomizationContext';
 import { LogoInstitucional } from './LogoInstitucional';
 import { ConfiguracionVisual } from '../types';
+import { imprimirTicket, TICKET_EJEMPLO } from '../utils/ticketPrinter';
 
 // Paletas de muestra predefinidas para aplicar en un clic
 const PALETAS_PREDEFINIDAS = [
@@ -109,19 +113,21 @@ export const PersonalizacionView: React.FC = () => {
     resetToDefaults 
   } = useCustomization();
 
-  const [activeTab, setActiveTab] = useState<'identidad' | 'logos' | 'colores' | 'estilos' | 'vista-previa'>('identidad');
+  const [activeTab, setActiveTab] = useState<'identidad' | 'logos' | 'ticket' | 'colores' | 'estilos' | 'vista-previa'>('identidad');
   const [showConfirmReset, setShowConfirmReset] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [imprimiendoPrueba, setImprimiendoPrueba] = useState(false);
 
   const fileInputLogoRef = useRef<HTMLInputElement>(null);
   const fileInputLogoMovilRef = useRef<HTMLInputElement>(null);
   const fileInputFaviconRef = useRef<HTMLInputElement>(null);
   const fileInputFondoTvRef = useRef<HTMLInputElement>(null);
+  const fileInputTicketLogoRef = useRef<HTMLInputElement>(null);
 
   // Manejador genérico para leer archivos y convertirlos a base64
   const handleFileUpload = (
     e: React.ChangeEvent<HTMLInputElement>, 
-    targetKey: 'logoPrincipalUrl' | 'logoMovilUrl' | 'faviconUrl' | 'pantallaFondoValor'
+    targetKey: 'logoPrincipalUrl' | 'logoMovilUrl' | 'faviconUrl' | 'pantallaFondoValor' | 'ticketLogoUrl'
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -177,6 +183,37 @@ export const PersonalizacionView: React.FC = () => {
       buttonHoverColor: p.buttonHoverColor,
       borderColor: p.borderColor,
       headerColor: p.headerColor
+    });
+  };
+
+  const handleImprimirPrueba = async () => {
+    setImprimiendoPrueba(true);
+    try {
+      await imprimirTicket(TICKET_EJEMPLO, previewConfig);
+    } catch (err) {
+      console.warn('Error imprimiendo prueba de ticket:', err);
+    } finally {
+      setImprimiendoPrueba(false);
+    }
+  };
+
+  const restablecerTextosTicket = () => {
+    updatePreview({
+      ticketEncabezado: previewConfig.nombreInstitucion || 'Tribunal Electoral',
+      ticketSubencabezado: 'Comprobante Oficial de Turno',
+      ticketMensajeEspera: 'Por favor permanezca atento a la Pantalla Pública y al audio del llamado.',
+      ticketPieMensaje: '¡Gracias por su visita! Conserve este comprobante hasta finalizar su atención.',
+      ticketNotaPie: 'Validez únicamente para el día de emisión.',
+      ticketMostrarLogo: true,
+      ticketLogoTamano: 'mediano',
+      ticketMostrarCiudadano: true,
+      ticketMostrarTramite: true,
+      ticketMostrarFechaHora: true,
+      ticketMostrarCodigoBarras: true,
+      ticketMostrarQr: true,
+      ticketAnchoPapel: '80mm',
+      ticketEstiloFuente: 'monospace',
+      ticketEspaciado: 'normal'
     });
   };
 
@@ -287,6 +324,19 @@ export const PersonalizacionView: React.FC = () => {
 
         <button
           type="button"
+          onClick={() => setActiveTab('ticket')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+            activeTab === 'ticket'
+              ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+              : 'text-slate-400 hover:text-white hover:bg-slate-900'
+          }`}
+        >
+          <TicketIcon className="w-4 h-4" />
+          <span>3. Personalizar Ticket</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('colores')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
             activeTab === 'colores'
@@ -295,7 +345,7 @@ export const PersonalizacionView: React.FC = () => {
           }`}
         >
           <Palette className="w-4 h-4" />
-          <span>3. Colores y Paleta</span>
+          <span>4. Colores y Paleta</span>
         </button>
 
         <button
@@ -308,7 +358,7 @@ export const PersonalizacionView: React.FC = () => {
           }`}
         >
           <Type className="w-4 h-4" />
-          <span>4. Tipografía y Estilos</span>
+          <span>5. Tipografía y Estilos</span>
         </button>
 
         <button
@@ -321,7 +371,7 @@ export const PersonalizacionView: React.FC = () => {
           }`}
         >
           <Eye className="w-4 h-4" />
-          <span>5. Vista Previa en Vivo</span>
+          <span>6. Vista Previa en Vivo</span>
         </button>
       </div>
 
@@ -660,7 +710,587 @@ export const PersonalizacionView: React.FC = () => {
       )}
 
       {/* ------------------------------------------------------------- */}
-      {/* PESTAÑA 3: COLORES Y PALETA */}
+      {/* PESTAÑA 3: PERSONALIZACIÓN DEL TICKET IMPRESO Y KIOSKO */}
+      {/* ------------------------------------------------------------- */}
+      {activeTab === 'ticket' && (
+        <div className="space-y-6">
+          {/* Banner superior de opciones rápidas */}
+          <div className="p-4 rounded-2xl bg-blue-950/40 border border-blue-800/60 flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
+                <TicketIcon className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">
+                  Personalización del Ticket Térmico y Comprobante Oficial
+                </h3>
+                <p className="text-xs text-blue-200/80">
+                  Configure logotipos, encabezados, indicaciones para el ciudadano, código de barras/QR y papel térmico.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={restablecerTextosTicket}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 border border-slate-700 transition-colors cursor-pointer"
+                title="Restaurar textos oficiales del ticket"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Restaurar Textos</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleImprimirPrueba}
+                disabled={imprimiendoPrueba}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
+              >
+                <Printer className="w-4 h-4" />
+                <span>{imprimiendoPrueba ? 'Imprimiendo prueba...' : 'Probar Impresión de Ticket'}</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* COLUMNA IZQUIERDA: CONTROLES DE EDICIÓN (7 cols) */}
+            <div className="lg:col-span-7 space-y-6">
+              
+              {/* 1. SECCIÓN: LOGOTIPO DEL TICKET */}
+              <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-5">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <div className="flex items-center gap-2">
+                    <ImageIcon className="w-4 h-4 text-blue-400" />
+                    <h4 className="text-sm font-bold text-white">1. Logotipo del Ticket</h4>
+                  </div>
+
+                  {/* Switch para activar/desactivar logo en el ticket */}
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <span className="text-xs font-medium text-slate-400">Mostrar Logo</span>
+                    <input
+                      type="checkbox"
+                      checked={previewConfig.ticketMostrarLogo !== false}
+                      onChange={(e) => updatePreview({ ticketMostrarLogo: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-10 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600 relative"></div>
+                  </label>
+                </div>
+
+                {previewConfig.ticketMostrarLogo !== false ? (
+                  <div className="space-y-4">
+                    {/* Visualización del logo actual del ticket */}
+                    <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-20 h-16 rounded-xl bg-white p-1.5 flex items-center justify-center border border-slate-700 overflow-hidden shrink-0">
+                          {previewConfig.ticketLogoUrl || previewConfig.logoPrincipalUrl ? (
+                            <img
+                              src={previewConfig.ticketLogoUrl || previewConfig.logoPrincipalUrl}
+                              alt="Logo Ticket"
+                              className="max-h-full max-w-full object-contain filter grayscale contrast-125"
+                            />
+                          ) : (
+                            <span className="text-[10px] font-bold text-slate-400 text-center uppercase">
+                              Sin Logo
+                            </span>
+                          )}
+                        </div>
+                        <div>
+                          <span className="text-xs font-bold text-white block">
+                            {previewConfig.ticketLogoUrl
+                              ? 'Logo Exclusivo del Ticket Activo'
+                              : previewConfig.logoPrincipalUrl
+                              ? 'Usando Logo Principal de la Institución'
+                              : 'No hay logotipo cargado actualmente'}
+                          </span>
+                          <span className="text-[11px] text-slate-400">
+                            {previewConfig.ticketLogoUrl
+                              ? 'Imagen optimizada para impresión térmica.'
+                              : 'Heredando el logo del sistema institucional.'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {previewConfig.ticketLogoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => updatePreview({ ticketLogoUrl: '' })}
+                          className="p-2 rounded-xl bg-slate-900 hover:bg-rose-950 text-slate-400 hover:text-rose-400 border border-slate-800 transition-colors cursor-pointer"
+                          title="Quitar logo exclusivo y volver a heredar logo principal"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Botonera de carga y copia */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <input
+                        type="file"
+                        ref={fileInputTicketLogoRef}
+                        onChange={(e) => handleFileUpload(e, 'ticketLogoUrl')}
+                        accept="image/png,image/jpeg,image/jpg,image/svg+xml,image/webp"
+                        className="hidden"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => fileInputTicketLogoRef.current?.click()}
+                        className="py-2.5 px-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-md"
+                      >
+                        <Upload className="w-4 h-4" />
+                        <span>Subir Logo para Ticket</span>
+                      </button>
+
+                      {previewConfig.logoPrincipalUrl && (
+                        <button
+                          type="button"
+                          onClick={() => updatePreview({ ticketLogoUrl: previewConfig.logoPrincipalUrl })}
+                          className="py-2.5 px-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer border border-slate-700 transition-colors"
+                        >
+                          <Sparkles className="w-4 h-4 text-blue-400" />
+                          <span>Copiar Logo Principal</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Selector de tamaño de logo */}
+                    <div>
+                      <label className="text-xs font-semibold text-slate-300 block mb-2">
+                        Tamaño del Logotipo en el Ticket
+                      </label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          { id: 'pequeno', label: 'Pequeño', desc: '45px alto' },
+                          { id: 'mediano', label: 'Mediano', desc: '65px (Recomendado)' },
+                          { id: 'grande', label: 'Grande', desc: '85px alto' }
+                        ].map((t) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            onClick={() => updatePreview({ ticketLogoTamano: t.id as any })}
+                            className={`p-2.5 rounded-xl text-left border transition-all cursor-pointer ${
+                              (previewConfig.ticketLogoTamano || 'mediano') === t.id
+                                ? 'bg-blue-600/20 border-blue-500 text-white'
+                                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            <span className="text-xs font-bold block">{t.label}</span>
+                            <span className="text-[10px] text-slate-400">{t.desc}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80 text-[11px] text-slate-400 flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                      <span>
+                        <strong>Consejo para impresoras térmicas:</strong> Utilice imágenes con fondo blanco o transparente y alto contraste (logotipos en negro o tonos oscuros) para evitar manchas de tinta o difuminados en el papel térmico.
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800/60 text-center">
+                    <p className="text-xs text-slate-400">
+                      El logotipo está actualmente <strong>desactivado</strong> para los tickets impresos. Solo se mostrará el nombre institucional en texto.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* 2. SECCIÓN: TEXTOS DEL TICKET */}
+              <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-emerald-400" />
+                    <h4 className="text-sm font-bold text-white">2. Textos y Mensajes del Ticket</h4>
+                  </div>
+                  <span className="text-[11px] text-slate-400">Edición en tiempo real</span>
+                </div>
+
+                {/* Encabezado Institucional */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">
+                    Encabezado Institucional Principal
+                  </label>
+                  <input
+                    type="text"
+                    value={previewConfig.ticketEncabezado ?? previewConfig.nombreInstitucion ?? ''}
+                    onChange={(e) => updatePreview({ ticketEncabezado: e.target.value })}
+                    placeholder="Ej: Tribunal Electoral de Panamá"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 font-semibold"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Aparece en la parte superior del comprobante en tipografía destacada y mayúsculas.
+                  </p>
+                </div>
+
+                {/* Subencabezado */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">
+                    Subencabezado / Tipo de Comprobante o Sede
+                  </label>
+                  <input
+                    type="text"
+                    value={previewConfig.ticketSubencabezado ?? 'Comprobante Oficial de Turno'}
+                    onChange={(e) => updatePreview({ ticketSubencabezado: e.target.value })}
+                    placeholder="Ej: Sede Principal Ancón • Comprobante Oficial"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Línea secundaria debajo del encabezado (puede incluir la sede o dirección regional).
+                  </p>
+                </div>
+
+                {/* Mensaje de espera */}
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">
+                    Mensaje de Espera / Indicaciones para el Ciudadano
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={previewConfig.ticketMensajeEspera ?? 'Por favor permanezca atento a la Pantalla Pública y al audio del llamado.'}
+                    onChange={(e) => updatePreview({ ticketMensajeEspera: e.target.value })}
+                    placeholder="Ej: Por favor permanezca atento a la Pantalla Pública y al audio del llamado."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-blue-500 resize-none leading-relaxed"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Instrucción visible debajo de los detalles para orientar a la persona en sala.
+                  </p>
+                </div>
+
+                {/* Mensaje de pie */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1">
+                      Mensaje de Despedida / Pie
+                    </label>
+                    <input
+                      type="text"
+                      value={previewConfig.ticketPieMensaje ?? '¡Gracias por su visita! Conserve este comprobante hasta finalizar su atención.'}
+                      onChange={(e) => updatePreview({ ticketPieMensaje: e.target.value })}
+                      placeholder="Ej: ¡Gracias por su visita!"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1">
+                      Nota de Validez / Advertencia
+                    </label>
+                    <input
+                      type="text"
+                      value={previewConfig.ticketNotaPie ?? 'Validez únicamente para el día de emisión.'}
+                      onChange={(e) => updatePreview({ ticketNotaPie: e.target.value })}
+                      placeholder="Ej: Validez únicamente para el día de emisión."
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. SECCIÓN: ELEMENTOS VISIBLES EN EL TICKET ("Y DEMÁS") */}
+              <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <div className="flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-amber-400" />
+                    <h4 className="text-sm font-bold text-white">3. Elementos Visibles en el Ticket</h4>
+                  </div>
+                  <span className="text-[11px] text-slate-400">Activar / Desactivar bloques</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    {
+                      key: 'ticketMostrarCiudadano',
+                      label: 'Nombre del Ciudadano',
+                      desc: 'Muestra el nombre completo ingresado en el kiosko',
+                      val: previewConfig.ticketMostrarCiudadano !== false
+                    },
+                    {
+                      key: 'ticketMostrarTramite',
+                      label: 'Nombre del Trámite',
+                      desc: 'Muestra la insignia del trámite (ej: Cedulación)',
+                      val: previewConfig.ticketMostrarTramite !== false
+                    },
+                    {
+                      key: 'ticketMostrarFechaHora',
+                      label: 'Fecha y Hora de Emisión',
+                      desc: 'Muestra la fecha del día y hora exacta del turno',
+                      val: previewConfig.ticketMostrarFechaHora !== false
+                    },
+                    {
+                      key: 'ticketMostrarCodigoBarras',
+                      label: 'Código de Barras 1D',
+                      desc: 'Imprime código de barras lineal para lectores ópticos',
+                      val: previewConfig.ticketMostrarCodigoBarras !== false
+                    },
+                    {
+                      key: 'ticketMostrarQr',
+                      label: 'Código QR 2D',
+                      desc: 'Imprime código QR para verificación digital del turno',
+                      val: previewConfig.ticketMostrarQr === true
+                    }
+                  ].map((item) => (
+                    <label
+                      key={item.key}
+                      className="p-3 rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-700 flex items-start justify-between gap-3 cursor-pointer transition-colors"
+                    >
+                      <div>
+                        <span className="text-xs font-bold text-white block">{item.label}</span>
+                        <span className="text-[10px] text-slate-400 leading-tight block mt-0.5">{item.desc}</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={item.val}
+                        onChange={(e) => updatePreview({ [item.key]: e.target.checked } as any)}
+                        className="mt-0.5 rounded text-blue-600 focus:ring-blue-500 bg-slate-900 border-slate-700 w-4 h-4 cursor-pointer"
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* 4. SECCIÓN: FORMATO DE PAPEL TÉRMICO Y TIPOGRAFÍA */}
+              <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">
+                <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+                  <Printer className="w-4 h-4 text-purple-400" />
+                  <h4 className="text-sm font-bold text-white">4. Formato de Papel Térmico y Tipografía</h4>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Ancho de papel */}
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                      Ancho de Papel Térmico
+                    </label>
+                    <select
+                      value={previewConfig.ticketAnchoPapel || '80mm'}
+                      onChange={(e) => updatePreview({ ticketAnchoPapel: e.target.value as any })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+                    >
+                      <option value="80mm">80 mm (Estándar POS)</option>
+                      <option value="58mm">58 mm (Compacto POS)</option>
+                    </select>
+                  </div>
+
+                  {/* Estilo de fuente */}
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                      Tipografía del Comprobante
+                    </label>
+                    <select
+                      value={previewConfig.ticketEstiloFuente || 'monospace'}
+                      onChange={(e) => updatePreview({ ticketEstiloFuente: e.target.value as any })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+                    >
+                      <option value="monospace">Monoespaciada Térmica (Courier)</option>
+                      <option value="sans-serif">Sans-serif Moderna (Limpia)</option>
+                    </select>
+                  </div>
+
+                  {/* Espaciado */}
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                      Densidad / Espaciado
+                    </label>
+                    <select
+                      value={previewConfig.ticketEspaciado || 'normal'}
+                      onChange={(e) => updatePreview({ ticketEspaciado: e.target.value as any })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+                    >
+                      <option value="compacto">Compacto (Ahorra Papel)</option>
+                      <option value="normal">Normal (Equilibrado)</option>
+                      <option value="amplio">Amplio (Mayor legibilidad)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* COLUMNA DERECHA: VISTA PREVIA EN VIVO DEL TICKET (5 cols, sticky) */}
+            <div className="lg:col-span-5 sticky top-6 space-y-4">
+              <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Eye className="w-4 h-4 text-blue-400" />
+                  <span className="text-xs font-bold text-white uppercase tracking-wider">
+                    Vista Previa en Vivo (Papel Térmico)
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-950 text-blue-400 border border-blue-800">
+                  {previewConfig.ticketAnchoPapel || '80mm'}
+                </span>
+              </div>
+
+              {/* Render del rollo de ticket térmico */}
+              <div className="p-4 sm:p-6 rounded-3xl bg-slate-950 border border-slate-800 shadow-2xl flex justify-center">
+                <div 
+                  className={`bg-white text-black p-5 sm:p-6 shadow-2xl relative transition-all duration-200 ${
+                    previewConfig.ticketAnchoPapel === '58mm' ? 'w-[260px]' : 'w-[320px] sm:w-[340px]'
+                  }`}
+                  style={{
+                    fontFamily: previewConfig.ticketEstiloFuente === 'sans-serif' ? 'system-ui, sans-serif' : "'Courier New', Courier, monospace",
+                    borderRadius: '2px',
+                    boxShadow: '0 20px 35px -10px rgba(0,0,0,0.5), 0 0 1px 1px rgba(0,0,0,0.05)'
+                  }}
+                >
+                  {/* Corte dentado superior simulado */}
+                  <div className="absolute top-0 left-0 right-0 h-1.5 bg-repeat-x flex justify-between overflow-hidden opacity-30">
+                    {Array.from({ length: 30 }).map((_, i) => (
+                      <span key={i} className="inline-block w-2.5 h-1 border-b border-dashed border-slate-400"></span>
+                    ))}
+                  </div>
+
+                  {/* 1. Logotipo del Ticket */}
+                  {previewConfig.ticketMostrarLogo !== false && (previewConfig.ticketLogoUrl || previewConfig.logoPrincipalUrl) && (
+                    <div className="text-center mb-3 pt-2">
+                      <img
+                        src={previewConfig.ticketLogoUrl || previewConfig.logoPrincipalUrl}
+                        alt="Logo Ticket"
+                        className="mx-auto object-contain filter grayscale contrast-125"
+                        style={{
+                          maxHeight: previewConfig.ticketLogoTamano === 'pequeno' ? '45px' : previewConfig.ticketLogoTamano === 'grande' ? '85px' : '65px',
+                          maxWidth: '85%'
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {/* 2. Encabezado */}
+                  <div className="text-center">
+                    <h3 className="text-sm font-black uppercase tracking-tight leading-tight">
+                      {previewConfig.ticketEncabezado || previewConfig.nombreInstitucion || 'Tribunal Electoral'}
+                    </h3>
+                    {(previewConfig.ticketSubencabezado || previewConfig.nombreSistema) && (
+                      <p className="text-[10px] text-slate-700 mt-0.5 leading-snug">
+                        {previewConfig.ticketSubencabezado || `${previewConfig.nombreSistema} • Comprobante Oficial`}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="my-2.5 border-t border-dashed border-black" />
+
+                  {/* 3. Ciudadano */}
+                  {previewConfig.ticketMostrarCiudadano !== false && (
+                    <div className="text-center my-1.5">
+                      <span className="text-[9px] uppercase tracking-wider text-slate-600 block">Ciudadano(a)</span>
+                      <p className="text-xs font-bold capitalize leading-tight">
+                        Carlos Eduardo Rodríguez Gómez
+                      </p>
+                    </div>
+                  )}
+
+                  {/* 4. Turno Gigante */}
+                  <div className="text-center my-2">
+                    <span className="text-[9px] uppercase tracking-wider text-slate-600 block">Número de Turno</span>
+                    <div className="text-5xl font-black tracking-tight leading-none my-1 font-mono">
+                      C001
+                    </div>
+                    {previewConfig.ticketMostrarTramite !== false && (
+                      <span className="inline-block border border-black rounded px-2 py-0.5 text-[10px] font-bold uppercase mt-1">
+                        Cedulación
+                      </span>
+                    )}
+                  </div>
+
+                  {/* 5. Fecha y Hora */}
+                  {previewConfig.ticketMostrarFechaHora !== false && (
+                    <>
+                      <div className="my-2 border-t border-dashed border-black" />
+                      <div className="text-[10px] space-y-0.5">
+                        <div className="flex justify-between">
+                          <span className="text-slate-600">Fecha:</span>
+                          <span className="font-semibold">{new Date().toLocaleDateString('es-PA')}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-600">Hora:</span>
+                          <span className="font-semibold">{new Date().toLocaleTimeString('es-PA')}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-600">Estado:</span>
+                          <span className="font-semibold">En espera de atención</span>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {/* 6. Mensaje de espera */}
+                  {previewConfig.ticketMensajeEspera && (
+                    <>
+                      <div className="my-2 border-t border-dashed border-black" />
+                      <p className="text-[9.5px] text-center leading-snug text-slate-900">
+                        {previewConfig.ticketMensajeEspera}
+                      </p>
+                    </>
+                  )}
+
+                  {/* 7. Código de barras */}
+                  {previewConfig.ticketMostrarCodigoBarras !== false && (
+                    <div className="my-3 text-center">
+                      <div className="flex justify-center items-center gap-[1.5px] h-6 mx-auto">
+                        <span className="w-[2px] h-full bg-black inline-block" />
+                        <span className="w-[1px] h-full bg-black inline-block" />
+                        <span className="w-[3px] h-full bg-black inline-block" />
+                        <span className="w-[1px] h-full bg-black inline-block" />
+                        <span className="w-[2px] h-full bg-black inline-block" />
+                        <span className="w-[4px] h-full bg-black inline-block" />
+                        <span className="w-[1px] h-full bg-black inline-block" />
+                        <span className="w-[2px] h-full bg-black inline-block" />
+                        <span className="w-[3px] h-full bg-black inline-block" />
+                        <span className="w-[1px] h-full bg-black inline-block" />
+                        <span className="w-[2px] h-full bg-black inline-block" />
+                      </div>
+                      <span className="text-[10px] font-mono tracking-widest block mt-0.5 font-bold">*C001*</span>
+                    </div>
+                  )}
+
+                  {/* 8. Código QR */}
+                  {previewConfig.ticketMostrarQr === true && (
+                    <div className="my-2.5 text-center">
+                      <div className="inline-block p-1 bg-white border border-black rounded">
+                        <QrCode className="w-12 h-12 text-black mx-auto" />
+                      </div>
+                      <span className="text-[8px] text-slate-600 block mt-0.5">Verificación Digital de Turno</span>
+                    </div>
+                  )}
+
+                  {/* 9. Pie de ticket */}
+                  {(previewConfig.ticketPieMensaje || previewConfig.ticketNotaPie) && (
+                    <>
+                      <div className="my-2 border-t border-dashed border-black" />
+                      {previewConfig.ticketPieMensaje && (
+                        <p className="text-[9px] text-center font-bold leading-tight text-slate-800">
+                          {previewConfig.ticketPieMensaje}
+                        </p>
+                      )}
+                      {previewConfig.ticketNotaPie && (
+                        <p className="text-[8px] text-center italic text-slate-600 mt-1">
+                          {previewConfig.ticketNotaPie}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Botón de acción para imprimir prueba */}
+              <button
+                type="button"
+                onClick={handleImprimirPrueba}
+                disabled={imprimiendoPrueba}
+                className="w-full py-3.5 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-xl shadow-blue-600/30 flex items-center justify-center gap-2 cursor-pointer transition-all transform active:scale-98"
+              >
+                <Printer className="w-4 h-4" />
+                <span>{imprimiendoPrueba ? 'ENVIANDO A IMPRESORA...' : 'IMPRIMIR TICKET DE PRUEBA'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* PESTAÑA 4: COLORES Y PALETA */}
       {/* ------------------------------------------------------------- */}
       {activeTab === 'colores' && (
         <div className="space-y-6">

@@ -36,7 +36,25 @@ export const DEFAULT_CONFIGURACION_VISUAL: ConfiguracionVisual = {
   themeMode: 'light',
 
   pantallaFondoTipo: 'color',
-  pantallaFondoValor: '#0B1329'
+  pantallaFondoValor: '#0B1329',
+
+  // Configuración de Ticket Térmico y Kiosko
+  ticketLogoUrl: '',
+  ticketMostrarLogo: true,
+  ticketLogoTamano: 'mediano',
+  ticketEncabezado: 'Tribunal Electoral',
+  ticketSubencabezado: 'Comprobante Oficial de Turno',
+  ticketMensajeEspera: 'Por favor permanezca atento a la Pantalla Pública y al audio del llamado.',
+  ticketPieMensaje: '¡Gracias por su visita! Conserve este comprobante hasta finalizar su atención.',
+  ticketNotaPie: 'Validez únicamente para el día de emisión.',
+  ticketMostrarCiudadano: true,
+  ticketMostrarTramite: true,
+  ticketMostrarFechaHora: true,
+  ticketMostrarCodigoBarras: true,
+  ticketMostrarQr: true,
+  ticketAnchoPapel: '80mm',
+  ticketEstiloFuente: 'monospace',
+  ticketEspaciado: 'normal'
 };
 
 interface CustomizationContextType {

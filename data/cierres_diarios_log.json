@@ -1,0 +1,29 @@
+[
+  {
+    "fecha": "2026-10-12",
+    "totalTickets": 3,
+    "archivoPath": "historial/2026/10/12/tickets.json",
+    "bucket": "historial-turnos",
+    "tamanoBytes": 6693,
+    "estado": "EXITOSO",
+    "ejecutadoEn": "2026-10-16T20:02:36.505Z",
+    "sedesProcesadas": {
+      "ancon": 3,
+      "bocas_del_toro": 0,
+      "cocle": 0,
+      "colon": 0,
+      "chiriqui": 0,
+      "darien": 0,
+      "herrera": 0,
+      "los_santos": 0,
+      "panama_centro": 0,
+      "panama_norte": 0,
+      "panama_este": 0,
+      "panama_oeste": 0,
+      "san_miguelito": 0,
+      "veraguas": 0,
+      "guna_yala": 0,
+      "arraijan": 0
+    }
+  }
+]

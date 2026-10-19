@@ -155,3 +155,26 @@ ON CONFLICT (id) DO UPDATE SET
 INSERT INTO public.usuarios (id, nombre, usuario, email, password, rol, activo, sede_id) VALUES
 ('user-superadmin', 'Super Administrador', 'superadmin', 'superadmin@institucion.gob', 'admin', 'SUPER_ADMIN', TRUE, 'ancon')
 ON CONFLICT (id) DO NOTHING;
+
+
+-- =============================================================================
+-- 6. TABLA: CIERRES_DIARIOS (Control de Cierres de Jornada e Historial en Storage)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS public.cierres_diarios (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    fecha DATE NOT NULL UNIQUE, -- YYYY-MM-DD en America/Panama
+    total_tickets INTEGER NOT NULL DEFAULT 0,
+    archivo_path TEXT NOT NULL, -- ej: historial/2026/10/16/tickets.json
+    bucket VARCHAR(100) NOT NULL DEFAULT 'historial-turnos',
+    tamano_bytes BIGINT DEFAULT 0,
+    estado VARCHAR(50) NOT NULL DEFAULT 'EXITOSO' CHECK (estado IN ('EXITOSO', 'ERROR', 'EN_PROCESO')),
+    error_mensaje TEXT,
+    sedes_procesadas JSONB,
+    metadatos JSONB,
+    ejecutado_en TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE public.cierres_diarios IS 'Bitácora centralizada de cierres diarios automáticos y respaldo en Supabase Storage';
+CREATE INDEX IF NOT EXISTS idx_cierres_diarios_fecha ON public.cierres_diarios(fecha);
+CREATE INDEX IF NOT EXISTS idx_cierres_diarios_estado ON public.cierres_diarios(estado);

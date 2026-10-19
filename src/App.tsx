@@ -3,6 +3,7 @@ import { Navbar, AppView } from './components/Navbar';
 import { KioskView } from './components/KioskView';
 import { PantallaPublica } from './components/PantallaPublica';
 import { AdminView } from './components/AdminView';
+import { ReportesView } from './components/ReportesView';
 import { wsClient } from './services/websocketClient';
 import { 
   Caja, 
@@ -40,7 +41,7 @@ export default function App() {
     if (viewParam === 'caja' || viewParam === 'triada' || (viewParam as string) === 'personalizacion') {
       return 'admin';
     }
-    return viewParam && ['kiosk', 'pantalla-caja', 'pantalla-triada', 'pantalla', 'admin'].includes(viewParam)
+    return viewParam && ['kiosk', 'pantalla-caja', 'pantalla-triada', 'pantalla', 'admin', 'reportes'].includes(viewParam)
       ? viewParam
       : 'kiosk';
   });
@@ -85,7 +86,7 @@ export default function App() {
   const [connectionStatus, setConnectionStatus] = useState<'CONNECTED' | 'CONNECTING' | 'DISCONNECTED'>('CONNECTING');
   const [audioEnabled, setAudioEnabled] = useState(true);
 
-  // Sincronizar filtro de audio según la vista
+  // Sincronizar filtro y habilitación de audio según la vista
   useEffect(() => {
     if (currentView === 'pantalla-caja') {
       wsClient.setAudioFilter('CAJA');
@@ -94,7 +95,11 @@ export default function App() {
     } else {
       wsClient.setAudioFilter('ALL');
     }
-  }, [currentView]);
+
+    // El sonido sólo debe sonar en las pantallas públicas, no en las ventanillas de caja, triada o panel admin
+    const esPantallaPublica = currentView === 'pantalla-caja' || currentView === 'pantalla-triada' || currentView === 'pantalla';
+    wsClient.setAudioEnabled(esPantallaPublica && audioEnabled);
+  }, [currentView, audioEnabled]);
 
   const handleAdminTabChange = (tab: 'metricas' | 'caja' | 'triada' | 'personalizacion') => {
     setAdminTab(tab);
@@ -174,6 +179,8 @@ export default function App() {
       wsClient.register('PANTALLA', null, null, currentSedeId);
     } else if (view === 'kiosk') {
       wsClient.register('KIOSK', null, null, currentSedeId);
+    } else if (view === 'reportes') {
+      wsClient.register('ADMINISTRADOR', null, null, currentSedeId);
     } else if (view === 'admin') {
       if (adminTab === 'caja' || adminTab === 'triada') {
         wsClient.register('FUNCIONARIO', null, cajaId, currentSedeId);
@@ -214,11 +221,11 @@ export default function App() {
     }
 
     if (snap.ultimosLlamados && snap.ultimosLlamados.length > 0) {
-      // Para Pantalla de Cajas: SOLO turnos activamente en estado LLAMANDO.
+      // Para Pantalla de Cajas: SOLO turnos activamente en estado LLAMANDO
       const callCaja = snap.ultimosLlamados.find(t => t.etapa !== 'TRIADA' && t.estado === 'LLAMANDO');
       setUltimoLlamadoCaja(callCaja || null);
 
-      // Para Pantalla de Triada: SOLO turnos activamente en estado LLAMANDO.
+      // Para Pantalla de Triada: SOLO turnos activamente en estado LLAMANDO
       const callTriada = snap.ultimosLlamados.find(t => t.etapa === 'TRIADA' && t.estado === 'LLAMANDO');
       setUltimoLlamadoTriada(callTriada || null);
     } else {
@@ -482,6 +489,15 @@ export default function App() {
             onTabChange={handleAdminTabChange}
             onRefresh={recargarEstadoInicial}
             triadaEsperandoCount={triadaEsperandoCount}
+            currentSedeId={currentSedeId}
+            onSedeChange={handleSedeChange}
+          />
+        )}
+
+        {/* CENTRO DE REPORTES Y AUDITORÍA (SECCIÓN APARTE) */}
+        {currentView === 'reportes' && (
+          <ReportesView
+            cajas={cajas}
             currentSedeId={currentSedeId}
             onSedeChange={handleSedeChange}
           />

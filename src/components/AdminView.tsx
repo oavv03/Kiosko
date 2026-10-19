@@ -4,7 +4,6 @@ import {
   Activity, 
   Clock, 
   Users, 
-  Play, 
   RotateCcw, 
   Power, 
   CheckCircle2, 
@@ -12,7 +11,6 @@ import {
   ChevronRight, 
   UserPlus, 
   Terminal, 
-  Zap, 
   Trash2, 
   Key, 
   Lock, 
@@ -28,13 +26,16 @@ import {
   AlertCircle, 
   Check, 
   Building2,
-  Palette 
+  Palette,
+  FileSpreadsheet,
+  Database
 } from 'lucide-react';
 import { Caja, Ticket, Usuario, RolUsuario, MetricasSistema, EventoRealtime } from '../types';
 import { useCustomization } from '../context/CustomizationContext';
 import { CajaView } from './CajaView';
 import { TriadaView } from './TriadaView';
 import { PersonalizacionView } from './PersonalizacionView';
+import { CierreDiarioView } from './CierreDiarioView';
 
 interface AdminViewProps {
   cajas: Caja[];
@@ -76,7 +77,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
     return 'metricas';
   });
 
-  const [superAdminSection, setSuperAdminSection] = useState<'metricas' | 'usuarios' | 'personalizacion'>(() => {
+  const [superAdminSection, setSuperAdminSection] = useState<'metricas' | 'usuarios' | 'personalizacion' | 'cierre-diario'>(() => {
     return activeTab === 'personalizacion' ? 'personalizacion' : 'metricas';
   });
 
@@ -116,8 +117,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [superAdminLoginLoading, setSuperAdminLoginLoading] = useState(false);
 
   const [eventos, setEventos] = useState<EventoRealtime[]>([]);
-  const [testLog, setTestLog] = useState<string[]>([]);
-  const [isTesting, setIsTesting] = useState(false);
 
   // Estados para creación de nuevo usuario y asignación a caja o triada
   const [showUserModal, setShowUserModal] = useState(false);
@@ -151,6 +150,58 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [editNumero, setEditNumero] = useState<number>(1);
   const [editNombre, setEditNombre] = useState('');
   const [editTipo, setEditTipo] = useState<'CAJA' | 'TRIADA'>('CAJA');
+
+  // Estados para seleccionar y reiniciar cubículo por si un ticket no avanza o surge error
+  const [cajaReinicioSeleccionadaId, setCajaReinicioSeleccionadaId] = useState<number | null>(() => {
+    return cajas.length > 0 ? cajas[0].id : 1;
+  });
+  const [ticketReinicioSeleccionadoId, setTicketReinicioSeleccionadoId] = useState<string>('AUTO');
+  const [reiniciandoCajaId, setReiniciandoCajaId] = useState<number | null>(null);
+  const [mensajeReinicio, setMensajeReinicio] = useState<{ tipo: 'success' | 'error'; texto: string } | null>(null);
+
+  const ejecutarReinicioCaja = async (idCaja: number, idTicket?: string) => {
+    setReiniciandoCajaId(idCaja);
+    setMensajeReinicio(null);
+    try {
+      const payloadBody: any = {};
+      if (idTicket && idTicket !== 'AUTO') {
+        payloadBody.ticketId = idTicket;
+      }
+      const res = await fetch(`/api/cajas/${idCaja}/reiniciar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payloadBody)
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Error al reiniciar el cubículo');
+      }
+
+      setMensajeReinicio({
+        tipo: 'success',
+        texto: data.message || `Caja reiniciada exitosamente.`
+      });
+
+      setCajaReinicioSeleccionadaId(idCaja);
+      if (data.ticket?.id) {
+        setTicketReinicioSeleccionadoId(data.ticket.id);
+      }
+
+      if (onRefresh) onRefresh();
+      fetchEventos();
+    } catch (err: any) {
+      setMensajeReinicio({
+        tipo: 'error',
+        texto: err.message || 'No se pudo reiniciar el cubículo.'
+      });
+    } finally {
+      setReiniciandoCajaId(null);
+      setTimeout(() => {
+        setMensajeReinicio(prev => prev?.tipo === 'success' ? null : prev);
+      }, 7000);
+    }
+  };
 
   // Cargar eventos de auditoría
   const fetchEventos = async () => {
@@ -219,7 +270,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
     if (!confirm('¿Desea reiniciar todos los turnos y restablecer las cajas?')) return;
     try {
       await fetch('/api/test/reset', { method: 'POST' });
-      setTestLog(['Base de datos reiniciada con éxito']);
       if (onRefresh) onRefresh();
     } catch (e) {
       console.error(e);
@@ -247,6 +297,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
       }
       setSessionSuperAdmin(data.user);
       localStorage.setItem('superadmin_session', JSON.stringify(data.user));
+      if (data.token) {
+        localStorage.setItem('superadmin_token', data.token);
+      }
       setSuperAdminLoginUser('');
       setSuperAdminLoginPass('');
     } catch (err: any) {
@@ -259,12 +312,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const handleSuperAdminLogout = () => {
     setSessionSuperAdmin(null);
     localStorage.removeItem('superadmin_session');
+    localStorage.removeItem('superadmin_token');
   };
 
   // Creación de usuario por el Super Admin
   const crearFuncionario = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nuevoNombre || !nuevoEmail) return;
+    if (!nuevoNombre) return;
 
     try {
       const res = await fetch('/api/usuarios', {
@@ -272,11 +326,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           nombre: nuevoNombre,
-          usuario: nuevoUsuario.trim() || nuevoEmail.split('@')[0],
-          email: nuevoEmail.trim(),
+          usuario: nuevoUsuario.trim() || (nuevoNombre.split(' ')[0].toLowerCase() + Math.floor(Math.random() * 1000)),
           password: nuevoPassword.trim() || '123',
           rol: nuevoRol,
-          cajaAsignadaId: nuevaCajaId === null || nuevaCajaId === 0 ? null : nuevaCajaId
+          cajaAsignadaId: nuevaCajaId === null || nuevaCajaId === 0 ? null : nuevaCajaId,
+          sedeId: currentSedeId
         })
       });
       if (res.ok) {
@@ -285,8 +339,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
         setNuevoUsuario('');
         setNuevoEmail('');
         setNuevoPassword('');
-        setNuevoRol('FUNCIONARIO');
-        setNuevaCajaId(1);
+        setNuevoRol('FUNCIONARIO_CAJA');
+        setNuevaCajaId(null);
         if (onRefresh) onRefresh();
       }
     } catch (e) {
@@ -311,11 +365,24 @@ export const AdminView: React.FC<AdminViewProps> = ({
     if (!usuarioAUbicar) return;
     setGuardandoUbicacion(true);
     try {
+      const targetCaja = cajas.find(c => c.id === estacionSeleccionadaModal);
+      let rolActualizado = usuarioAUbicar.rol;
+      if (targetCaja) {
+        if (usuarioAUbicar.rol === 'SUPER_ADMIN') {
+          rolActualizado = 'SUPER_ADMIN';
+        } else if (usuarioAUbicar.rol === 'SUPERVISOR_CAJA' || usuarioAUbicar.rol === 'SUPERVISOR_TRIADA') {
+          rolActualizado = targetCaja.tipo === 'TRIADA' ? 'SUPERVISOR_TRIADA' : 'SUPERVISOR_CAJA';
+        } else {
+          rolActualizado = targetCaja.tipo === 'TRIADA' ? 'FUNCIONARIO_TRIADA' : 'FUNCIONARIO_CAJA';
+        }
+      }
+
       const res = await fetch(`/api/usuarios/${usuarioAUbicar.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          cajaAsignadaId: estacionSeleccionadaModal
+          cajaAsignadaId: estacionSeleccionadaModal,
+          rol: rolActualizado
         })
       });
       if (res.ok) {
@@ -375,85 +442,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
       if (res.ok && onRefresh) onRefresh();
     } catch (e) {
       console.error(e);
-    }
-  };
-
-  /**
-   * Ejecuta automáticamente el escenario de prueba exacto solicitado por el usuario:
-   * 1. Caja 1 -> disponible
-   * 2. Caja 2 -> disponible
-   * 3. Caja 3 -> ocupada
-   * 4. Caja 4 -> sin funcionario
-   * 5. Crear A001 -> debe asignarse a Caja 1
-   * 6. Crear A002 -> debe asignarse a Caja 2
-   * 7. Crear A003 -> debe colocarse en espera
-   */
-  const ejecutarEscenarioPrueba = async () => {
-    setIsTesting(true);
-    setTestLog(['Iniciando configuración del escenario de prueba...']);
-
-    try {
-      const res = await fetch('/api/test/setup-escenario', { method: 'POST' });
-      const data = await res.json();
-
-      setTestLog([
-        '✓ Configuración completada:',
-        '• Caja 1 (Juan) configurada como DISPONIBLE',
-        '• Caja 2 (María) configurada como DISPONIBLE',
-        '• Caja 3 (Carlos) configurada como OCUPADA (Organización Electoral)',
-        '• Caja 4 configurada como DESCONECTADA (sin funcionario)',
-        '---------------------------------------',
-        '✓ Ticket C001 generado (Cedulación - Juan Rodríguez) → Asignado a Caja 1',
-        '✓ Ticket E001 generado (Extranjería - María Fernández) → Asignado a Caja 2',
-        '✓ Ticket R001 generado (Registro Civil - Pedro González) → Colocado en ESPERANDO (Caja 3 ocupada, Caja 4 sin funcionario)',
-        '---------------------------------------',
-        'Listo para probar: Puede pulsar "Completar C001 en Caja 1" abajo para ver cómo R001 pasa automáticamente a Caja 1.'
-      ]);
-
-      fetchEventos();
-      if (onRefresh) onRefresh();
-    } catch (err: any) {
-      setTestLog(prev => [...prev, `Error: ${err.message}`]);
-    } finally {
-      setIsTesting(false);
-    }
-  };
-
-  // Paso 2 del test: Completar A001 en Caja 1
-  const completarA001 = async () => {
-    try {
-      setTestLog(prev => [...prev, 'Finalizando A001 en Caja 1...']);
-      const res = await fetch('/api/cajas/1/finalizar', { method: 'POST' });
-      if (res.ok) {
-        setTestLog(prev => [
-          ...prev,
-          '✓ A001 finalizado en Caja 1.',
-          '✓ Caja 1 quedó disponible y el DESPACHADOR asignó automáticamente A003 a Caja 1!'
-        ]);
-        fetchEventos();
-        if (onRefresh) onRefresh();
-      }
-    } catch (err: any) {
-      setTestLog(prev => [...prev, `Error: ${err.message}`]);
-    }
-  };
-
-  // Paso 3 del test: Llamar A003 en Caja 1
-  const llamarA003 = async () => {
-    try {
-      setTestLog(prev => [...prev, 'Llamando turno en Caja 1...']);
-      const res = await fetch('/api/cajas/1/llamar', { method: 'POST' });
-      if (res.ok) {
-        setTestLog(prev => [
-          ...prev,
-          '✓ Evento TICKET_LLAMADO emitido en tiempo real.',
-          '✓ Pantalla Pública actualizada inmediatamente con A003 en Caja 1.'
-        ]);
-        fetchEventos();
-        if (onRefresh) onRefresh();
-      }
-    } catch (err: any) {
-      setTestLog(prev => [...prev, `Error: ${err.message}`]);
     }
   };
 
@@ -537,9 +525,23 @@ export const AdminView: React.FC<AdminViewProps> = ({
           </button>
         </div>
 
-        <div className="flex items-center gap-2 pr-2">
+        <div className="flex items-center gap-2 pr-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => {
+              const url = new URL(window.location.href);
+              url.searchParams.set('view', 'reportes');
+              window.location.href = url.toString();
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-emerald-400 hover:text-white bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-800/80 transition-all cursor-pointer shadow-sm"
+            title="Ir a la sección de Reportes y Auditoría para Supervisores"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Centro de Reportes</span>
+          </button>
+
           <span 
-            className="text-xs font-semibold px-2.5 py-1 rounded-lg border"
+            className="text-xs font-semibold px-2.5 py-1 rounded-lg border hidden sm:inline-block"
             style={{
               backgroundColor: configuracion.backgroundColor || '#F8FAFC',
               borderColor: configuracion.borderColor || '#E2E8F0',
@@ -618,7 +620,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   type="text"
                   required
                   autoFocus
-                  placeholder="superadmin"
+                  placeholder="oavega"
                   value={superAdminLoginUser}
                   onChange={(e) => setSuperAdminLoginUser(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
@@ -658,14 +660,14 @@ export const AdminView: React.FC<AdminViewProps> = ({
               <div className="pt-3 border-t border-slate-800/80">
                 <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-[11px] text-slate-400 flex items-center justify-between gap-2">
                   <div>
-                    <span className="font-semibold text-slate-300 block">Credenciales iniciales:</span>
-                    <span className="font-mono text-blue-300">superadmin</span> / <span className="font-mono text-blue-300">admin</span>
+                    <span className="font-semibold text-slate-300 block">Super Administrador:</span>
+                    <span className="font-mono text-blue-300">oavega</span>
                   </div>
                   <button
                     type="button"
                     onClick={() => {
-                      setSuperAdminLoginUser('superadmin');
-                      setSuperAdminLoginPass('admin');
+                      setSuperAdminLoginUser('oavega');
+                      setSuperAdminLoginPass('1234561');
                     }}
                     className="px-2.5 py-1 rounded-lg bg-blue-950/80 hover:bg-blue-900 border border-blue-800 text-blue-300 font-medium text-[11px] cursor-pointer transition-colors"
                   >
@@ -773,7 +775,31 @@ export const AdminView: React.FC<AdminViewProps> = ({
               <Palette className="w-4 h-4" />
               <span>Personalización del Sistema</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => setSuperAdminSection('cierre-diario')}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all cursor-pointer ${
+                superAdminSection === 'cierre-diario'
+                  ? 'text-white shadow-md'
+                  : 'hover:opacity-80'
+              }`}
+              style={{
+                backgroundColor: superAdminSection === 'cierre-diario' ? (configuracion.buttonColor || '#1D4ED8') : 'transparent',
+                color: superAdminSection === 'cierre-diario' ? '#FFFFFF' : (configuracion.mutedTextColor || '#64748B')
+              }}
+            >
+              <Database className="w-4 h-4" />
+              <span>Cierre Diario y Supabase Storage</span>
+            </button>
           </div>
+
+          {/* 0. SECCIÓN CIERRE DIARIO Y SUPABASE STORAGE (EXCLUSIVA SUPER ADMIN) */}
+          {superAdminSection === 'cierre-diario' && (
+            <div className="space-y-6">
+              <CierreDiarioView />
+            </div>
+          )}
 
           {/* 1. SECCIÓN PERSONALIZACIÓN DEL SISTEMA (EXCLUSIVA SUPER ADMIN) */}
           {superAdminSection === 'personalizacion' && (
@@ -862,6 +888,234 @@ export const AdminView: React.FC<AdminViewProps> = ({
         </div>
       </div>
 
+      {/* HERRAMIENTA DESTACADA: SELECCIÓN Y REINICIO RÁPIDO DE CUBÍCULO POR BLOQUEO / ERROR */}
+      {(() => {
+        const cajaSeleccionadaParaReinicio = cajas.find(c => c.id === cajaReinicioSeleccionadaId) || cajas[0];
+        const ticketActualEnCajaReinicio = cajaSeleccionadaParaReinicio?.ticketActualId 
+          ? (ticketsActivos.find(t => t.id === cajaSeleccionadaParaReinicio.ticketActualId) || ticketsEsperando.find(t => t.id === cajaSeleccionadaParaReinicio.ticketActualId))
+          : null;
+
+        return (
+          <div className="p-6 rounded-3xl bg-gradient-to-r from-amber-950/30 via-slate-900 to-indigo-950/30 border border-amber-500/40 shadow-2xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
+
+            {/* Encabezado de la herramienta */}
+            <div className="flex flex-wrap items-start justify-between gap-4 mb-5 pb-4 border-b border-slate-800">
+              <div className="flex items-start gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0 shadow-inner">
+                  <RotateCcw className="w-6 h-6 text-amber-400" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[10px] font-black uppercase tracking-wider">
+                      Recuperación Operativa • Anti-Bloqueo
+                    </span>
+                    <span className="text-xs text-slate-400">
+                      Sede: <strong className="text-slate-200 capitalize">{currentSedeId}</strong>
+                    </span>
+                  </div>
+                  <h3 className="text-lg sm:text-xl font-black text-white mt-1 tracking-tight">
+                    Seleccionar y Reiniciar Caja / Recuperar Turno Atascado
+                  </h3>
+                  <p className="text-xs text-slate-300 mt-1 max-w-3xl leading-relaxed">
+                    Si un ticket no avanza, se queda congelado o surge algún error en la terminal, seleccione la caja o triada correspondiente y presione <strong>Reiniciar y Reasignar Turno</strong>. El sistema restaurará el cubículo a estado activo y le hará caer el <strong>mismo ticket</strong> para poder llamarlo, iniciar atención y avanzar sin perder el turno.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Notificación de resultado tras reiniciar */}
+            {mensajeReinicio && (
+              <div className={`mb-5 p-4 rounded-2xl border text-xs sm:text-sm flex items-center justify-between gap-3 shadow-lg ${
+                mensajeReinicio.tipo === 'success'
+                  ? 'bg-emerald-950/80 border-emerald-600/70 text-emerald-200 shadow-emerald-950/30'
+                  : 'bg-rose-950/80 border-rose-600/70 text-rose-200 shadow-rose-950/30'
+              }`}>
+                <div className="flex items-center gap-3">
+                  {mensajeReinicio.tipo === 'success' ? (
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+                  )}
+                  <span className="font-semibold">{mensajeReinicio.texto}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMensajeReinicio(null)}
+                  className="px-2 py-1 rounded-lg bg-black/30 hover:bg-black/50 text-xs font-bold cursor-pointer transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* Controles interactivos de Selección y Reinicio */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+              {/* 1. Selector de Cubículo */}
+              <div className="lg:col-span-5 bg-slate-950/70 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between">
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-amber-300 block mb-2 flex items-center gap-2">
+                    <Monitor className="w-4 h-4 text-amber-400" />
+                    <span>1. Seleccionar Cubículo:</span>
+                  </label>
+                  <select
+                    value={cajaSeleccionadaParaReinicio?.id || ''}
+                    onChange={(e) => {
+                      const id = Number(e.target.value);
+                      setCajaReinicioSeleccionadaId(id);
+                      setTicketReinicioSeleccionadoId('AUTO');
+                    }}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-3 text-sm font-bold text-white focus:outline-none focus:border-amber-500 cursor-pointer shadow-inner"
+                  >
+                    <optgroup label="Ventanillas de Caja (0 a 8)">
+                      {cajas.filter(c => c.tipo !== 'TRIADA').map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.numero === 0 ? 'Caja 0 (Preferencial)' : `Caja ${c.numero}`} {c.nombre ? `— ${c.nombre.replace(/^Caja \d+\s*-\s*/i, '')}` : ''} [{c.estado}{c.ticketActualCodigo ? ` • Turno: ${c.ticketActualCodigo}` : ' • Libre'}]
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Módulos de Triada / Fotografía (1 a 8)">
+                      {cajas.filter(c => c.tipo === 'TRIADA').map((c) => (
+                        <option key={c.id} value={c.id}>
+                          Triada {c.numero} {c.nombre ? `— ${c.nombre.replace(/^Triada \d+\s*-\s*/i, '')}` : ''} [{c.estado}{c.ticketActualCodigo ? ` • Turno: ${c.ticketActualCodigo}` : ' • Libre'}]
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </div>
+
+                {/* Resumen del cubículo actualmente seleccionado */}
+                {cajaSeleccionadaParaReinicio && (
+                  <div className="mt-3 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-slate-200">
+                        {cajaSeleccionadaParaReinicio.tipo === 'TRIADA' ? 'Módulo Triada' : 'Caja'} {cajaSeleccionadaParaReinicio.numero}
+                      </span>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        cajaSeleccionadaParaReinicio.estado === 'OCUPADA'
+                          ? 'bg-amber-950 text-amber-300 border border-amber-800'
+                          : cajaSeleccionadaParaReinicio.estado === 'DISPONIBLE'
+                          ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                          : 'bg-slate-800 text-slate-400'
+                      }`}>
+                        {cajaSeleccionadaParaReinicio.estado}
+                      </span>
+                    </div>
+                    <span className="text-slate-400 truncate max-w-[180px]">
+                      Operador: <strong className="text-slate-300">{cajaSeleccionadaParaReinicio.usuarioNombre || 'Sin operador'}</strong>
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* 2. Turno que caerá / se restaurará */}
+              <div className="lg:col-span-4 bg-slate-950/70 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between">
+                <div>
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-300 block mb-2 flex items-center gap-2">
+                    <Terminal className="w-4 h-4 text-blue-400" />
+                    <span>2. Turno que Caerá en la Caja:</span>
+                  </span>
+
+                  {cajaSeleccionadaParaReinicio?.ticketActualCodigo ? (
+                    <div className="p-3 rounded-xl bg-slate-900 border border-amber-500/40 flex items-center justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl font-black text-white font-display">
+                            {cajaSeleccionadaParaReinicio.ticketActualCodigo}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold uppercase border border-amber-500/30">
+                            Mismo Turno Actual
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-300 mt-0.5 font-medium truncate max-w-[200px]">
+                          {[ticketActualEnCajaReinicio?.ciudadanoNombre, ticketActualEnCajaReinicio?.ciudadanoApellido].filter(Boolean).join(' ') || ticketActualEnCajaReinicio?.tramite || 'Turno activo'}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[11px] font-bold text-amber-400 block">
+                          Listo para reasignar
+                        </span>
+                        <span className="text-[10px] text-slate-500">
+                          {ticketActualEnCajaReinicio?.estado || 'En atención'}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <select
+                        value={ticketReinicioSeleccionadoId}
+                        onChange={(e) => setTicketReinicioSeleccionadoId(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+                      >
+                        <option value="AUTO">
+                          Auto: Primer turno disponible en espera
+                        </option>
+                        {ticketsActivos.map(t => (
+                          <option key={t.id} value={t.id}>
+                            Turno {t.codigo} ({t.tramite}) — {[t.ciudadanoNombre, t.ciudadanoApellido].filter(Boolean).join(' ') || 'Ciudadano'} [{t.estado}]
+                          </option>
+                        ))}
+                        {ticketsEsperando.map(t => (
+                          <option key={t.id} value={t.id}>
+                            Turno {t.codigo} ({t.tramite}) — En cola de espera
+                          </option>
+                        ))}
+                      </select>
+                      <span className="text-[11px] text-slate-400 block">
+                        La caja actualmente no tiene ticket activo; se asignará automáticamente el seleccionado.
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="text-[11px] text-slate-400 mt-2">
+                  ✓ El ticket regresará a estado <strong className="text-emerald-400">ASIGNADO</strong> listo para llamar o atender.
+                </div>
+              </div>
+
+              {/* 3. Botones de Acción de Reinicio */}
+              <div className="lg:col-span-3 flex flex-col justify-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (cajaSeleccionadaParaReinicio) {
+                      ejecutarReinicioCaja(cajaSeleccionadaParaReinicio.id, ticketReinicioSeleccionadoId);
+                    }
+                  }}
+                  disabled={reiniciandoCajaId !== null || !cajaSeleccionadaParaReinicio}
+                  className="w-full py-4 px-4 rounded-2xl bg-gradient-to-r from-amber-600 via-amber-500 to-orange-600 hover:from-amber-500 hover:to-orange-500 disabled:opacity-50 text-white font-black text-xs sm:text-sm shadow-xl shadow-amber-600/30 flex items-center justify-center gap-2 transition-all transform active:scale-95 cursor-pointer text-center"
+                >
+                  <RotateCcw className={`w-5 h-5 shrink-0 ${reiniciandoCajaId === cajaSeleccionadaParaReinicio?.id ? 'animate-spin' : ''}`} />
+                  <span>
+                    {reiniciandoCajaId === cajaSeleccionadaParaReinicio?.id ? (
+                      'Reiniciando estación...'
+                    ) : cajaSeleccionadaParaReinicio?.ticketActualCodigo ? (
+                      <>Reiniciar y Reasignar {cajaSeleccionadaParaReinicio.ticketActualCodigo}</>
+                    ) : (
+                      <>Reiniciar {cajaSeleccionadaParaReinicio?.tipo === 'TRIADA' ? 'Triada' : 'Caja'} {cajaSeleccionadaParaReinicio?.numero}</>
+                    )}
+                  </span>
+                </button>
+
+                {cajaSeleccionadaParaReinicio && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onCajaChange?.(cajaSeleccionadaParaReinicio.id);
+                      handleTabChange(cajaSeleccionadaParaReinicio.tipo === 'TRIADA' ? 'triada' : 'caja');
+                    }}
+                    className="w-full py-2.5 px-3 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-slate-200 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Monitor className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Ir a Terminal ({cajaSeleccionadaParaReinicio.tipo === 'TRIADA' ? 'Triada' : 'Caja'} {cajaSeleccionadaParaReinicio.numero})</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Monitor de Cajas y Módulos de Triada en Vivo */}
       <div className="space-y-6">
         {/* 1. SECCIÓN DE CAJAS DE ATENCIÓN (Caja 0 a 8) */}
@@ -911,6 +1165,16 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   </div>
 
                   <div className="flex items-center gap-1">
+                    {/* Botón Reiniciar caja directo */}
+                    <button
+                      onClick={() => ejecutarReinicioCaja(caja.id, caja.ticketActualId || undefined)}
+                      disabled={reiniciandoCajaId === caja.id}
+                      title={caja.ticketActualCodigo ? `Reiniciar Caja ${caja.numero} y reasignar turno ${caja.ticketActualCodigo}` : `Reiniciar Caja ${caja.numero}`}
+                      className="p-1.5 rounded-lg border border-slate-800 hover:border-amber-500 bg-slate-950 text-slate-400 hover:text-amber-300 transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className={`w-3.5 h-3.5 ${reiniciandoCajaId === caja.id ? 'animate-spin text-amber-400' : ''}`} />
+                    </button>
+
                     {/* Botón Editar cubículo */}
                     <button
                       onClick={() => iniciarEdicionCaja(caja)}
@@ -964,17 +1228,42 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    onCajaChange?.(caja.id);
-                    handleTabChange('caja');
-                  }}
-                  className="w-full mt-2.5 py-1.5 rounded-xl bg-blue-950/60 hover:bg-blue-900/60 border border-blue-800 text-blue-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <Monitor className="w-3.5 h-3.5" />
-                  <span>Atender en Caja {caja.numero}</span>
-                </button>
+                <div className="mt-2.5 space-y-1.5">
+                  {/* Botón de Reiniciar y recaer ticket en esta caja */}
+                  {caja.ticketActualCodigo ? (
+                    <button
+                      type="button"
+                      onClick={() => ejecutarReinicioCaja(caja.id, caja.ticketActualId || undefined)}
+                      disabled={reiniciandoCajaId === caja.id}
+                      className="w-full py-1.5 rounded-xl bg-amber-950/50 hover:bg-amber-900/70 border border-amber-700/60 text-amber-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className={`w-3.5 h-3.5 ${reiniciandoCajaId === caja.id ? 'animate-spin' : ''}`} />
+                      <span>Reiniciar y recaer {caja.ticketActualCodigo}</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => ejecutarReinicioCaja(caja.id)}
+                      disabled={reiniciandoCajaId === caja.id}
+                      className="w-full py-1 rounded-xl bg-slate-950 hover:bg-slate-800/80 border border-slate-800 text-slate-400 hover:text-slate-200 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className={`w-3 h-3 ${reiniciandoCajaId === caja.id ? 'animate-spin' : ''}`} />
+                      <span>Reiniciar cubículo</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onCajaChange?.(caja.id);
+                      handleTabChange('caja');
+                    }}
+                    className="w-full py-1.5 rounded-xl bg-blue-950/60 hover:bg-blue-900/60 border border-blue-800 text-blue-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Monitor className="w-3.5 h-3.5" />
+                    <span>Atender en Caja {caja.numero}</span>
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -1025,6 +1314,16 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   </div>
 
                   <div className="flex items-center gap-1">
+                    {/* Botón Reiniciar triada directo */}
+                    <button
+                      onClick={() => ejecutarReinicioCaja(triada.id, triada.ticketActualId || undefined)}
+                      disabled={reiniciandoCajaId === triada.id}
+                      title={triada.ticketActualCodigo ? `Reiniciar Triada ${triada.numero} y reasignar turno ${triada.ticketActualCodigo}` : `Reiniciar Triada ${triada.numero}`}
+                      className="p-1.5 rounded-lg border border-slate-800 hover:border-amber-500 bg-slate-950 text-slate-400 hover:text-amber-300 transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className={`w-3.5 h-3.5 ${reiniciandoCajaId === triada.id ? 'animate-spin text-amber-400' : ''}`} />
+                    </button>
+
                     {/* Botón Editar cubículo */}
                     <button
                       onClick={() => iniciarEdicionCaja(triada)}
@@ -1078,77 +1377,46 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    onCajaChange?.(triada.id);
-                    handleTabChange('triada');
-                  }}
-                  className="w-full mt-2.5 py-1.5 rounded-xl bg-indigo-950/60 hover:bg-indigo-900/60 border border-indigo-800 text-indigo-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <Camera className="w-3.5 h-3.5" />
-                  <span>Atender en Triada {triada.numero}</span>
-                </button>
+                <div className="mt-2.5 space-y-1.5">
+                  {/* Botón de Reiniciar y recaer ticket en este módulo */}
+                  {triada.ticketActualCodigo ? (
+                    <button
+                      type="button"
+                      onClick={() => ejecutarReinicioCaja(triada.id, triada.ticketActualId || undefined)}
+                      disabled={reiniciandoCajaId === triada.id}
+                      className="w-full py-1.5 rounded-xl bg-amber-950/50 hover:bg-amber-900/70 border border-amber-700/60 text-amber-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className={`w-3.5 h-3.5 ${reiniciandoCajaId === triada.id ? 'animate-spin' : ''}`} />
+                      <span>Reiniciar y recaer {triada.ticketActualCodigo}</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => ejecutarReinicioCaja(triada.id)}
+                      disabled={reiniciandoCajaId === triada.id}
+                      className="w-full py-1 rounded-xl bg-slate-950 hover:bg-slate-800/80 border border-slate-800 text-slate-400 hover:text-slate-200 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className={`w-3 h-3 ${reiniciandoCajaId === triada.id ? 'animate-spin' : ''}`} />
+                      <span>Reiniciar módulo</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onCajaChange?.(triada.id);
+                      handleTabChange('triada');
+                    }}
+                    className="w-full py-1.5 rounded-xl bg-indigo-950/60 hover:bg-indigo-900/60 border border-indigo-800 text-indigo-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>Atender en Triada {triada.numero}</span>
+                  </button>
+                </div>
               </div>
             ))}
           </div>
         </div>
-      </div>
-
-      {/* Banco de Pruebas del Requerimiento Exacto del Usuario */}
-      <div className="p-6 rounded-3xl bg-gradient-to-r from-blue-950/40 via-slate-900 to-slate-900 border border-blue-900/50 shadow-xl">
-        <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
-          <div>
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-400 uppercase tracking-wider">
-              <Zap className="w-3.5 h-3.5" />
-              Banco de Pruebas Automatizado
-            </span>
-            <h3 className="text-xl font-bold text-white mt-0.5">
-              Simulador del Flujo del Requerimiento
-            </h3>
-            <p className="text-xs text-slate-400 mt-1 max-w-2xl">
-              Configura automáticamente: Caja 1 y 2 disponibles, Caja 3 ocupada, Caja 4 sin funcionario. Emite tickets C001 (Cedulación), E001 (Extranjería) y R001 (Registro Civil) verificando que C001 va a Caja 1, E001 va a Caja 2, y R001 queda en espera hasta que una caja se libere.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={ejecutarEscenarioPrueba}
-              disabled={isTesting}
-              className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
-            >
-              <Play className="w-3.5 h-3.5 fill-white" />
-              <span>1. Configurar Escenario (C001, E001, R001)</span>
-            </button>
-
-            <button
-              onClick={completarA001}
-              className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-emerald-600/30 transition-all cursor-pointer"
-            >
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>2. Finalizar C001 en Caja 1 (Asigna R001)</span>
-            </button>
-
-            <button
-              onClick={llamarA003}
-              className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition-all cursor-pointer"
-            >
-              <Terminal className="w-3.5 h-3.5" />
-              <span>3. Llamar R001 (Muestra en TV)</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Consola de Log del Test */}
-        {testLog.length > 0 && (
-          <div className="mt-4 p-4 rounded-2xl bg-slate-950 font-mono text-xs text-slate-300 border border-slate-800 space-y-1 overflow-x-auto">
-            {testLog.map((line, idx) => (
-              <div key={idx} className={line.startsWith('✓') ? 'text-emerald-400 font-semibold' : line.startsWith('•') ? 'text-blue-300' : 'text-slate-400'}>
-                {line}
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Registro de Auditoría de Eventos en Tiempo Real */}
@@ -1269,9 +1537,27 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                       u.rol === 'SUPER_ADMIN' || u.rol === 'ADMINISTRADOR'
                         ? 'bg-purple-950 text-purple-300 border border-purple-800'
-                        : 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                        : u.rol === 'SUPERVISOR_CAJA'
+                          ? 'bg-blue-950 text-blue-300 border border-blue-800'
+                          : u.rol === 'SUPERVISOR_TRIADA'
+                            ? 'bg-indigo-950 text-indigo-300 border border-indigo-800'
+                            : u.rol === 'FUNCIONARIO_CAJA'
+                              ? 'bg-sky-950 text-sky-300 border border-sky-800'
+                              : 'bg-emerald-950 text-emerald-300 border border-emerald-800'
                     }`}>
-                      {u.rol === 'SUPER_ADMIN' ? 'SUPER ADMIN' : u.rol}
+                      {u.rol === 'SUPER_ADMIN' 
+                        ? 'SUPER ADMIN' 
+                        : u.rol === 'ADMINISTRADOR'
+                          ? 'ADMINISTRADOR'
+                          : u.rol === 'SUPERVISOR_CAJA'
+                            ? 'SUPERVISOR DE CAJA'
+                            : u.rol === 'SUPERVISOR_TRIADA'
+                              ? 'SUPERVISOR DE TRIADA'
+                              : u.rol === 'FUNCIONARIO_CAJA' 
+                                ? 'FUNCIONARIO CAJA' 
+                                : u.rol === 'FUNCIONARIO_TRIADA' 
+                                  ? 'FUNCIONARIO TRIADA' 
+                                  : u.rol}
                     </span>
                   </td>
                   <td className="py-3 px-4">
@@ -1309,7 +1595,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         <Edit2 className="w-3.5 h-3.5 text-amber-400" />
                       </button>
 
-                      {u.rol !== 'SUPER_ADMIN' && u.usuario !== 'superadmin' && u.usuario !== 'admin' && (
+                      {u.rol !== 'SUPER_ADMIN' && u.usuario?.toLowerCase() !== 'oavega' && u.usuario !== 'superadmin' && u.usuario !== 'admin' && (
                         <button
                           onClick={() => eliminarUsuario(u.id, u.nombre)}
                           className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-950 text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
@@ -1379,30 +1665,23 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">Correo Electrónico</label>
-                  <input
-                    type="email"
-                    required
-                    placeholder="laura.mendez@institucion.gob"
-                    value={nuevoEmail}
-                    onChange={(e) => setNuevoEmail(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">Rol de Acceso</label>
-                  <select
-                    value={nuevoRol}
-                    onChange={(e) => setNuevoRol(e.target.value as RolUsuario)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="FUNCIONARIO">Funcionario / Operador</option>
-                    <option value="SUPER_ADMIN">Super Administrador</option>
-                  </select>
-                </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1">Rol de Acceso / Permisos</label>
+                <select
+                  value={nuevoRol}
+                  onChange={(e) => {
+                    const r = e.target.value as RolUsuario;
+                    setNuevoRol(r);
+                    setNuevaCajaId(null);
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                >
+                  <option value="FUNCIONARIO_CAJA">Funcionario de Caja (Exclusivo Cajas 0 a 8)</option>
+                  <option value="SUPERVISOR_CAJA">Supervisor de Caja (Supervisión Cajas 0 a 8)</option>
+                  <option value="FUNCIONARIO_TRIADA">Funcionario de Triada (Exclusivo Triadas 1 a 8)</option>
+                  <option value="SUPERVISOR_TRIADA">Supervisor de Triada (Supervisión Triadas 1 a 8)</option>
+                  <option value="SUPER_ADMIN">Super Administrador</option>
+                </select>
               </div>
 
               <div>
@@ -1413,20 +1692,24 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
                 >
                   <option value="">Sin estación fija (Flotante / Rotativo)</option>
-                  <optgroup label="Ventanillas de Caja (0 a 8)">
-                    {cajas.filter(c => c.tipo !== 'TRIADA').map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.numero === 0 ? 'Caja 0 (Preferencial)' : `Caja ${c.numero}`} - {c.nombre.replace(/^Caja \d+\s*-\s*/i, '')}
-                      </option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="Módulos de Triada / Fotografía (1 a 8)">
-                    {cajas.filter(c => c.tipo === 'TRIADA').map(c => (
-                      <option key={c.id} value={c.id}>
-                        Triada {c.numero} - {c.nombre.replace(/^Triada \d+\s*-\s*/i, '')}
-                      </option>
-                    ))}
-                  </optgroup>
+                  {nuevoRol !== 'FUNCIONARIO_TRIADA' && nuevoRol !== 'SUPERVISOR_TRIADA' && (
+                    <optgroup label="Ventanillas de Caja (0 a 8)">
+                      {cajas.filter(c => c.tipo !== 'TRIADA').map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.numero === 0 ? 'Caja 0 (Preferencial)' : `Caja ${c.numero}`} - {c.nombre.replace(/^Caja \d+\s*-\s*/i, '')}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {nuevoRol !== 'FUNCIONARIO_CAJA' && nuevoRol !== 'SUPERVISOR_CAJA' && (
+                    <optgroup label="Módulos de Triada / Fotografía (1 a 8)">
+                      {cajas.filter(c => c.tipo === 'TRIADA').map(c => (
+                        <option key={c.id} value={c.id}>
+                          Triada {c.numero} - {c.nombre.replace(/^Triada \d+\s*-\s*/i, '')}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
               </div>
 
@@ -1481,31 +1764,35 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
             {/* Pestañas para elegir tipo de estación */}
             <div className="flex items-center gap-2 p-1 rounded-xl bg-slate-950 border border-slate-800">
-              <button
-                type="button"
-                onClick={() => setTabTipoUbicar('CAJA')}
-                className={`flex-1 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                  tabTipoUbicar === 'CAJA'
-                    ? 'bg-blue-600 text-white shadow-md'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Monitor className="w-4 h-4" />
-                <span>Ventanillas de Caja (0 a 8)</span>
-              </button>
+              {usuarioAUbicar?.rol !== 'FUNCIONARIO_TRIADA' && usuarioAUbicar?.rol !== 'SUPERVISOR_TRIADA' && (
+                <button
+                  type="button"
+                  onClick={() => setTabTipoUbicar('CAJA')}
+                  className={`flex-1 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    tabTipoUbicar === 'CAJA'
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Monitor className="w-4 h-4" />
+                  <span>Ventanillas de Caja (0 a 8)</span>
+                </button>
+              )}
 
-              <button
-                type="button"
-                onClick={() => setTabTipoUbicar('TRIADA')}
-                className={`flex-1 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                  tabTipoUbicar === 'TRIADA'
-                    ? 'bg-indigo-600 text-white shadow-md'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Camera className="w-4 h-4" />
-                <span>Módulos Triada / Fotografía (1 a 8)</span>
-              </button>
+              {usuarioAUbicar?.rol !== 'FUNCIONARIO_CAJA' && usuarioAUbicar?.rol !== 'SUPERVISOR_CAJA' && (
+                <button
+                  type="button"
+                  onClick={() => setTabTipoUbicar('TRIADA')}
+                  className={`flex-1 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    tabTipoUbicar === 'TRIADA'
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Camera className="w-4 h-4" />
+                  <span>Módulos Triada / Fotografía (1 a 8)</span>
+                </button>
+              )}
             </div>
 
             {/* Cuadrícula interactiva de selección de estación */}
@@ -1653,29 +1940,23 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">Correo Electrónico</label>
-                  <input
-                    type="email"
-                    required
-                    value={editUserEmail}
-                    onChange={(e) => setEditUserEmail(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">Rol</label>
-                  <select
-                    value={editUserRol}
-                    onChange={(e) => setEditUserRol(e.target.value as RolUsuario)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="FUNCIONARIO">Funcionario / Operador</option>
-                    <option value="SUPER_ADMIN">Super Administrador</option>
-                  </select>
-                </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1">Rol / Permisos</label>
+                <select
+                  value={editUserRol}
+                  onChange={(e) => {
+                    const r = e.target.value as RolUsuario;
+                    setEditUserRol(r);
+                    setEditUserCajaId(null);
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                >
+                  <option value="FUNCIONARIO_CAJA">Funcionario de Caja (Exclusivo Cajas 0 a 8)</option>
+                  <option value="SUPERVISOR_CAJA">Supervisor de Caja (Supervisión Cajas 0 a 8)</option>
+                  <option value="FUNCIONARIO_TRIADA">Funcionario de Triada (Exclusivo Triadas 1 a 8)</option>
+                  <option value="SUPERVISOR_TRIADA">Supervisor de Triada (Supervisión Triadas 1 a 8)</option>
+                  <option value="SUPER_ADMIN">Super Administrador</option>
+                </select>
               </div>
 
               <div>
@@ -1686,20 +1967,24 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
                 >
                   <option value="">Sin estación fija (Flotante)</option>
-                  <optgroup label="Ventanillas de Caja (0 a 8)">
-                    {cajas.filter(c => c.tipo !== 'TRIADA').map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.numero === 0 ? 'Caja 0 (Preferencial)' : `Caja ${c.numero}`} - {c.nombre.replace(/^Caja \d+\s*-\s*/i, '')}
-                      </option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="Módulos de Triada / Fotografía (1 a 8)">
-                    {cajas.filter(c => c.tipo === 'TRIADA').map(c => (
-                      <option key={c.id} value={c.id}>
-                        Triada {c.numero} - {c.nombre.replace(/^Triada \d+\s*-\s*/i, '')}
-                      </option>
-                    ))}
-                  </optgroup>
+                  {editUserRol !== 'FUNCIONARIO_TRIADA' && editUserRol !== 'SUPERVISOR_TRIADA' && (
+                    <optgroup label="Ventanillas de Caja (0 a 8)">
+                      {cajas.filter(c => c.tipo !== 'TRIADA').map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.numero === 0 ? 'Caja 0 (Preferencial)' : `Caja ${c.numero}`} - {c.nombre.replace(/^Caja \d+\s*-\s*/i, '')}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {editUserRol !== 'FUNCIONARIO_CAJA' && editUserRol !== 'SUPERVISOR_CAJA' && (
+                    <optgroup label="Módulos de Triada / Fotografía (1 a 8)">
+                      {cajas.filter(c => c.tipo === 'TRIADA').map(c => (
+                        <option key={c.id} value={c.id}>
+                          Triada {c.numero} - {c.nombre.replace(/^Triada \d+\s*-\s*/i, '')}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
               </div>
 
